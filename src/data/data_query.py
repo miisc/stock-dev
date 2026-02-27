@@ -4,7 +4,7 @@
 """
 
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date
 from typing import Optional, List, Dict, Any
 from loguru import logger
 
@@ -39,10 +39,10 @@ class DataQuery:
         try:
             query = "SELECT * FROM stock_daily WHERE ts_code = ?"
             params = [ts_code]
-            
+            logger.debug(f"查询股票 {ts_code} 的日线数据，开始日期: {start_date}, 结束日期: {end_date}")
             if start_date:
                 # 转换日期格式为YYYYMMDD
-                if isinstance(start_date, datetime):
+                if isinstance(start_date, (datetime, date)):
                     start_date_str = start_date.strftime('%Y%m%d')
                 else:
                     start_date_str = start_date.replace('-', '')
@@ -51,7 +51,7 @@ class DataQuery:
             
             if end_date:
                 # 转换日期格式为YYYYMMDD
-                if isinstance(end_date, datetime):
+                if isinstance(end_date, (datetime, date)):
                     end_date_str = end_date.strftime('%Y%m%d')
                 else:
                     end_date_str = end_date.replace('-', '')
@@ -65,6 +65,8 @@ class DataQuery:
             
             # 转换日期格式从YYYYMMDD到datetime
             if not df.empty and 'trade_date' in df.columns:
+                # 确保trade_date是字符串类型
+                df['trade_date'] = df['trade_date'].astype(str)
                 df['trade_date'] = pd.to_datetime(df['trade_date'], format='%Y%m%d')
                 df.set_index('trade_date', inplace=True)
             

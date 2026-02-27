@@ -263,6 +263,31 @@ class StrategyConfigManager:
         """
         return list(self.strategies.keys())
     
+    def get_all_strategies(self) -> Dict[str, Dict[str, Any]]:
+        """
+        获取所有策略配置信息
+        
+        Returns:
+            策略ID到配置信息的字典
+        """
+        result = {}
+        for strategy_id, config in self.strategies.items():
+            result[strategy_id] = {
+                'name': config.name,
+                'description': config.description,
+                'parameters': {
+                    param_name: {
+                        'type': param.type.__name__,
+                        'default_value': param.default_value,
+                        'description': param.description,
+                        'min_value': param.min_value,
+                        'max_value': param.max_value
+                    }
+                    for param_name, param in config.parameters.items()
+                }
+            }
+        return result
+    
     def create_strategy(self, strategy_id: str, parameters: Optional[Dict[str, Any]] = None) -> Strategy:
         """
         创建策略实例
