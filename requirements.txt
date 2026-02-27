@@ -7,6 +7,9 @@ tushare>=1.4.0
 matplotlib>=3.7.0
 seaborn>=0.12.0
 
+# GUI界面
+PyQt5>=5.15.0
+
 # 技术指标计算
 ta>=0.10.2
 

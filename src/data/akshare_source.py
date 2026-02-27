@@ -66,14 +66,13 @@ class AKShareSource(DataSource):
                     else:
                         ak_symbol = 'sz' + ts_code
                 
-                df = ak.stock_zh_a_daily(symbol=ak_symbol)
+                # 转换日期格式为YYYYMMDD
+                start_date_formatted = start_date.replace('-', '')
+                end_date_formatted = end_date.replace('-', '')
                 
-                # 过滤日期范围
-                if not df.empty and 'date' in df.columns:
-                    df['date'] = pd.to_datetime(df['date'])
-                    start_dt = pd.to_datetime(start_date)
-                    end_dt = pd.to_datetime(end_date)
-                    df = df[(df['date'] >= start_dt) & (df['date'] <= end_dt)]
+                df = ak.stock_zh_a_daily(symbol=ak_symbol, start_date=start_date_formatted, end_date=end_date_formatted)
+                
+                if not df.empty:
                     logger.info(f"新浪财经接口成功获取 {len(df)} 条数据")
                 
                 if df.empty:

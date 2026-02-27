@@ -398,6 +398,20 @@ class Strategy(ABC):
         self.on_init()
         self.inited = True
         self.logger.info("策略初始化完成")
+    
+    def set_parameters(self, params: Dict[str, Any]):
+        """
+        设置策略参数
+        
+        Args:
+            params: 参数字典
+        """
+        for name, value in params.items():
+            if hasattr(self, name):
+                setattr(self, name, value)
+                self.logger.debug(f"设置参数 {name} = {value}")
+            else:
+                self.logger.warning(f"未知参数: {name}")
 
 
 # 导入Direction枚举
