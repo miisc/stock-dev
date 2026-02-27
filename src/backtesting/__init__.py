@@ -1,15 +1,20 @@
 """
-回测系统模块
-提供策略回测功能
+回测引擎模块
+
+提供完整的回测功能，包括策略执行、交易模拟、状态管理等
 """
 
-from .engine import BacktestEngine
-from .strategies import Strategy, DualMAStrategy, BollingerBandsStrategy, RSIStrategy
+from .backtest_engine import BacktestEngine, BacktestConfig
+from .result import BacktestResult
+from .executor import ExecutionExecutor
+from .position_manager import PositionManager
+from .cost_model import CostModel
 
 __all__ = [
     "BacktestEngine",
-    "Strategy",
-    "DualMAStrategy",
-    "BollingerBandsStrategy",
-    "RSIStrategy"
+    "BacktestConfig",
+    "BacktestResult",
+    "ExecutionExecutor",
+    "PositionManager",
+    "CostModel"
 ]
