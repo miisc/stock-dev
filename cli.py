@@ -21,6 +21,7 @@ from src.trading import strategy_config_manager
 from src.trading.bar_data import BarData
 from src.data.data_query import DataQuery
 from src.data.data_fetcher import DataFetcher
+from src.backtesting import BacktestEngine, BacktestConfig
 from datetime import datetime, timedelta
 import pandas as pd
 
@@ -35,6 +36,7 @@ class StrategyConfigCLI:
         self.current_strategy = None
         self.current_symbol = None
         self.current_data = None
+        self.backtest_result = None
         
         # 加载配置文件
         config_file = project_root / "config" / "strategies.yaml"
@@ -238,39 +240,53 @@ class StrategyConfigCLI:
             print("请先选择股票和数据")
             return
         
-        print(f"正在对 {self.current_symbol} 运行 {self.current_strategy.name} 回测...")
-        
-        # 初始化策略
-        self.current_strategy.initialize()
-        
-        # 处理数据
-        for date, row in self.current_data.iterrows():
-            bar = BarData(
-                symbol=self.current_symbol,
-                datetime=date,
-                open=row['open'],
-                high=row['high'],
-                low=row['low'],
-                close=row['close'],
-                volume=row['volume']
-            )
-            self.current_strategy.update_bar(bar)
-        
-        # 获取结果
-        signals = self.current_strategy.signals
-        position = self.current_strategy.get_position(self.current_symbol)
-        
-        print(f"✓ 回测完成")
-        print(f"  生成信号数: {len(signals)}")
-        print(f"  最终持仓: {position.volume} 股")
-        
-        if signals:
-            print("\n交易信号:")
-            for i, signal in enumerate(signals[:10]):  # 只显示前10个
-                print(f"  {i+1}. {signal.datetime.strftime('%Y-%m-%d')} {signal.direction.value} @ {signal.price:.2f} - {signal.reason}")
+        # 获取回测配置
+        try:
+            print("\n回测配置:")
             
-            if len(signals) > 10:
-                print(f"  ... 还有 {len(signals) - 10} 个信号")
+            # 获取初始资金
+            initial_cash = input("请输入初始资金（默认100000）: ").strip()
+            initial_cash = float(initial_cash) if initial_cash else 100000.0
+            
+            # 获取手续费率
+            commission_rate = input("请输入手续费率（默认0.0003）: ").strip()
+            commission_rate = float(commission_rate) if commission_rate else 0.0003
+            
+            # 获取滑点率
+            slippage_rate = input("请输入滑点率（默认0.001）: ").strip()
+            slippage_rate = float(slippage_rate) if slippage_rate else 0.001
+            
+            # 创建回测配置
+            config = BacktestConfig(
+                start_date=self.current_data.index[0],
+                end_date=self.current_data.index[-1],
+                initial_cash=initial_cash,
+                commission_rate=commission_rate,
+                slippage_rate=slippage_rate
+            )
+            
+            print(f"\n开始运行回测...")
+            print(f"  策略: {self.current_strategy.name}")
+            print(f"  股票: {self.current_symbol}")
+            print(f"  时间范围: {config.start_date.strftime('%Y-%m-%d')} 到 {config.end_date.strftime('%Y-%m-%d')}")
+            print(f"  初始资金: {initial_cash:.2f}")
+            
+            # 创建回测引擎
+            engine = BacktestEngine(config)
+            
+            # 运行回测
+            result = engine.run_backtest(self.current_strategy, [self.current_symbol])
+            
+            # 保存结果
+            self.backtest_result = result
+            
+            # 显示结果
+            result.print_summary()
+            
+        except Exception as e:
+            print(f"回测失败: {e}")
+            import traceback
+            traceback.print_exc()
         
         print()
     
@@ -278,56 +294,54 @@ class StrategyConfigCLI:
         """显示回测结果"""
         print("\n--- 回测结果 ---")
         
-        if not self.current_strategy:
+        if not hasattr(self, 'backtest_result') or self.backtest_result is None:
             print("请先运行回测")
             return
         
-        if self.current_data is None or self.current_data.empty:
-            print("没有可用数据")
-            return
+        result = self.backtest_result
         
-        # 获取策略结果
-        signals = self.current_strategy.signals
-        position = self.current_strategy.get_position(self.current_symbol)
-        account = self.current_strategy.account
+        # 显示详细结果
+        print(f"策略名称: {result.strategy_name}")
+        print(f"股票代码: {', '.join(result.symbols)}")
+        print(f"回测期间: {result.start_date.strftime('%Y-%m-%d')} 到 {result.end_date.strftime('%Y-%m-%d')}")
         
-        print(f"策略名称: {self.current_strategy.name}")
-        print(f"股票代码: {self.current_symbol}")
-        print(f"数据期间: {self.current_data.index[0]} 到 {self.current_data.index[-1]}")
+        print(f"\n收益指标:")
+        print(f"  总收益率: {result.total_return:.2f}%")
+        print(f"  年化收益率: {result.annual_return:.2f}%")
+        print(f"  基准收益率: {result.metrics.benchmark_return:.2f}%")
+        print(f"  超额收益率: {result.metrics.excess_return:.2f}%")
         
-        print(f"\n交易统计:")
-        print(f"  总信号数: {len(signals)}")
+        print(f"\n风险指标:")
+        print(f"  最大回撤: {result.metrics.max_drawdown:.2f}%")
+        print(f"  年化波动率: {result.metrics.volatility:.2f}%")
+        print(f"  夏普比率: {result.metrics.sharpe_ratio:.2f}")
+        print(f"  卡玛比率: {result.metrics.calmar_ratio:.2f}")
         
-        buy_signals = [s for s in signals if s.direction.value == 'BUY']
-        sell_signals = [s for s in signals if s.direction.value == 'SELL']
+        print(f"\n交易指标:")
+        print(f"  总交易次数: {result.metrics.total_trades}")
+        print(f"  胜率: {result.metrics.win_rate:.2f}%")
+        print(f"  盈亏比: {result.metrics.profit_loss_ratio:.2f}")
+        print(f"  平均每笔收益率: {result.metrics.avg_trade_return:.2f}%")
         
-        print(f"  买入信号: {len(buy_signals)}")
-        print(f"  卖出信号: {len(sell_signals)}")
+        # 显示交易记录
+        if result.trades:
+            print(f"\n交易记录（最近10笔）:")
+            for i, trade in enumerate(result.trades[-10:]):
+                direction = trade.get('direction', '')
+                price = trade.get('price', 0)
+                volume = trade.get('volume', 0)
+                pnl = trade.get('pnl', 0)
+                print(f"  {i+1}. {trade.get('datetime', '')} {direction} {volume}股 @ {price:.2f} 盈亏: {pnl:.2f}")
         
-        print(f"\n持仓情况:")
-        print(f"  当前持仓: {position.volume} 股")
-        print(f"  持仓成本: {position.avg_price:.2f}")
-        print(f"  当前市值: {position.volume * self.current_data['close'].iloc[-1]:.2f}")
-        
-        print(f"\n账户情况:")
-        print(f"  初始资金: {account.initial_capital:.2f}")
-        print(f"  当前现金: {account.cash:.2f}")
-        print(f"  总资产: {account.total_assets:.2f}")
-        
-        # 计算收益率
-        initial_value = account.initial_capital
-        final_value = account.total_assets
-        total_return = (final_value - initial_value) / initial_value * 100
-        
-        print(f"\n收益情况:")
-        print(f"  总收益: {final_value - initial_value:.2f}")
-        print(f"  收益率: {total_return:.2f}%")
-        
-        # 计算基准收益（买入并持有）
-        buy_hold_return = (self.current_data['close'].iloc[-1] - self.current_data['close'].iloc[0]) / self.current_data['close'].iloc[0] * 100
-        
-        print(f"  基准收益(买入持有): {buy_hold_return:.2f}%")
-        print(f"  超额收益: {total_return - buy_hold_return:.2f}%")
+        # 显示信号统计
+        if result.signals:
+            buy_signals = [s for s in result.signals if s.direction.value == 'BUY']
+            sell_signals = [s for s in result.signals if s.direction.value == 'SELL']
+            
+            print(f"\n信号统计:")
+            print(f"  总信号数: {len(result.signals)}")
+            print(f"  买入信号: {len(buy_signals)}")
+            print(f"  卖出信号: {len(sell_signals)}")
         
         print()
     
