@@ -1,0 +1,59 @@
+# 策略配置文件
+
+# 策略配置
+strategies:
+  # 双均线策略配置
+  dual_ma:
+    name: "双均线策略"
+    description: "基于短期和长期移动平均线交叉的趋势跟踪策略"
+    parameters:
+      short_window: 5          # 短期均线窗口
+      long_window: 20          # 长期均线窗口
+      position_size: 100        # 每次交易数量
+      min_hold_bars: 3         # 最少持仓K线数
+      signal_threshold: 0.01    # 信号确认阈值
+      stop_loss_pct: 0.05      # 止损百分比
+      take_profit_pct: 0.10    # 止盈百分比
+  
+  # 保守型双均线策略配置
+  dual_ma_conservative:
+    name: "保守型双均线策略"
+    description: "使用更长周期的双均线策略，适合稳健投资"
+    parameters:
+      short_window: 10         # 较长的短期均线
+      long_window: 50          # 较长的长期均线
+      position_size: 50        # 较小的持仓
+      min_hold_bars: 5         # 较长的持仓时间
+      signal_threshold: 0.02    # 更严格的信号阈值
+      stop_loss_pct: 0.03      # 较紧的止损
+      take_profit_pct: 0.15    # 较高的止盈
+  
+  # 激进型双均线策略配置
+  dual_ma_aggressive:
+    name: "激进型双均线策略"
+    description: "使用较短周期的双均线策略，适合短期交易"
+    parameters:
+      short_window: 3          # 较短的短期均线
+      long_window: 15          # 较短的长期均线
+      position_size: 200       # 较大的持仓
+      min_hold_bars: 1         # 较短的持仓时间
+      signal_threshold: 0.005   # 较宽松的信号阈值
+      stop_loss_pct: 0.08      # 较宽的止损
+      take_profit_pct: 0.06    # 较低的止盈
+
+# 全局配置
+global:
+  # 默认策略
+  default_strategy: "dual_ma"
+  
+  # 风险管理
+  risk_management:
+    max_position_ratio: 0.2    # 单个策略最大仓位比例
+    max_total_position_ratio: 0.8  # 总仓位比例
+    daily_loss_limit: 0.05      # 日亏损限制
+  
+  # 交易设置
+  trading:
+    commission_rate: 0.0003     # 手续费率
+    slippage_rate: 0.001       # 滑点率
+    min_trade_amount: 1000      # 最小交易金额

@@ -1,0 +1,41 @@
+# 股票交易系统配置文件
+
+# 数据源配置
+data_source:
+  provider: "tushare"  # 数据源提供商: tushare, akshare
+  token: ""  # Tushare API token，需要在环境变量中设置
+  
+# 数据存储配置
+database:
+  type: "sqlite"
+  path: "data/stock_data.db"
+  
+# 回测配置
+backtesting:
+  initial_capital: 100000  # 初始资金
+  commission_rate: 0.0003  # 手续费率 0.03%
+  slippage_rate: 0.001  # 滑点率 0.1%
+  
+# 交易配置
+trading:
+  max_position_ratio: 0.2  # 单笔交易最大资金比例
+  max_daily_loss_ratio: 0.05  # 每日最大亏损比例
+  max_daily_trades: 10  # 单日最大交易次数
+  
+# 日志配置
+logging:
+  level: "INFO"
+  file: "logs/stock_system.log"
+  max_size: "10MB"
+  backup_count: 5
+  
+# API配置
+api:
+  broker: "simulation"  # 券商: simulation, jq, jg
+  api_key: ""  # 需要在环境变量中设置
+  api_secret: ""  # 需要在环境变量中设置
+  
+# 风控配置
+risk:
+  max_drawdown: 0.15  # 最大回撤限制
+  position_limit: 0.8  # 总仓位上限

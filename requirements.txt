@@ -1,0 +1,43 @@
+# 数据获取和处理
+pandas>=2.0.0
+numpy>=1.24.0
+tushare>=1.4.0
+
+# 数据可视化
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# 技术指标计算
+ta>=0.10.2
+
+# API请求
+requests>=2.31.0
+
+# 配置管理
+pyyaml>=6.0.1
+python-dotenv>=1.0.0
+
+# 日志
+loguru>=0.7.2
+
+# 数据验证
+pydantic>=2.5.0
+
+# 加密存储
+cryptography>=41.0.0
+
+# 异步支持
+aiohttp>=3.9.0
+
+# 测试框架
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+
+# 代码质量
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.7.0
+
+# Jupyter支持（可选）
+jupyter>=1.0.0
+ipykernel>=6.26.0
