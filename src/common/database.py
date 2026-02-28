@@ -100,6 +100,33 @@ class DatabaseManager:
                 INSERT OR IGNORE INTO account (id, total_assets, available_cash, position_value, update_time)
                 VALUES (1, 100000, 100000, 0, datetime('now'))
             """)
+
+            # Add composite index for performance
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_stock_daily_code_date 
+                ON stock_daily (ts_code, trade_date)
+            """)
+
+            # Backtest results table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS backtest_results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    strategy_name TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    start_date TEXT NOT NULL,
+                    end_date TEXT NOT NULL,
+                    initial_cash REAL NOT NULL,
+                    final_value REAL,
+                    total_return REAL,
+                    annual_return REAL,
+                    max_drawdown REAL,
+                    sharpe_ratio REAL,
+                    total_trades INTEGER,
+                    win_rate REAL,
+                    config_json TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+            """)
             
             conn.commit()
     

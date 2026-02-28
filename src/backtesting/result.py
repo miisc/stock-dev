@@ -91,10 +91,12 @@ class BacktestResult:
     
     @property
     def annual_return(self) -> float:
-        """年化收益率"""
-        if self.total_days == 0:
+        """年化收益率 (复利公式)"""
+        trading_days = len(self.daily_portfolio)
+        if trading_days < 2:
             return 0.0
-        return self.total_return * (365 / self.total_days)
+        total_ret = self.total_return / 100  # convert from percentage
+        return ((1 + total_ret) ** (252.0 / trading_days) - 1) * 100
     
     def _calculate_metrics(self) -> PerformanceMetrics:
         """计算绩效指标"""
@@ -110,8 +112,8 @@ class BacktestResult:
             volatility = np.std(daily_returns) * np.sqrt(252) * 100 if daily_returns else 0.0
             max_drawdown = self._calculate_max_drawdown()
             
-            # 计算夏普比率 (假设无风险利率为3%)
-            risk_free_rate = 0.03
+            # 计算夏普比率 (假设无风险利率为2%，参考中国国债)
+            risk_free_rate = 0.02
             sharpe_ratio = (annual_return/100 - risk_free_rate) / (volatility/100) if volatility > 0 else 0.0
             
             # 计算卡玛比率
