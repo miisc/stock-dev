@@ -25,6 +25,9 @@ from ..trading import strategy_config_manager
 from ..data.data_query import DataQuery
 from ..data.data_fetcher import DataFetcher
 from ..backtesting import BacktestEngine, BacktestConfig
+from ..data.universe import manager as universe_manager
+import threading
+from .chart_widget import BacktestChartWidget
 
 
 class BacktestThread(QThread):
@@ -95,6 +98,11 @@ class MainWindow(QMainWindow):
         
         # 加载策略
         self.load_strategies()
+
+        # 启动后自动从本地DB加载数据（延迟200ms等待UI完全渲染）
+        QTimer.singleShot(200, self.auto_load_local_data)
+        # 启动后后台检查并在需要时刷新股票池缓存（不阻塞UI）
+        threading.Thread(target=lambda: universe_manager.get_pool('all', force_refresh=False), daemon=True).start()
     
     def init_ui(self):
         """初始化用户界面"""
@@ -159,6 +167,11 @@ class MainWindow(QMainWindow):
         # 回测结果页
         results_tab = self.create_results_tab()
         tab_widget.addTab(results_tab, "回测结果")
+
+        # 可视化图表页
+        self.chart_widget = BacktestChartWidget()
+        tab_widget.addTab(self.chart_widget, "📈 图表")
+        self.right_tab_widget = tab_widget  # 保存引用以便跳转
         
         # 日志页
         log_tab = self.create_log_tab()
@@ -211,11 +224,21 @@ class MainWindow(QMainWindow):
         self.end_date_edit = QDateEdit(calendarPopup=True)
         self.end_date_edit.setDate(QDate.currentDate())
         symbol_layout.addRow("结束日期:", self.end_date_edit)
-        
-        # 获取数据按钮
-        self.fetch_button = QPushButton("获取数据")
+
+        # 本地数据状态提示
+        self.data_status_label = QLabel("本地数据: 未检查")
+        self.data_status_label.setStyleSheet("color: gray; font-size: 11px;")
+        symbol_layout.addRow("", self.data_status_label)
+
+        # 从网络更新按钮（本地有数据时无需点击）
+        self.fetch_button = QPushButton("从网络更新数据")
         self.fetch_button.clicked.connect(self.fetch_data)
         symbol_layout.addRow("", self.fetch_button)
+
+        # 股票代码或日期变化时自动刷新本地数据
+        self.symbol_edit.editingFinished.connect(self.auto_load_local_data)
+        self.start_date_edit.dateChanged.connect(self.auto_load_local_data)
+        self.end_date_edit.dateChanged.connect(self.auto_load_local_data)
         
         layout.addWidget(symbol_group)
         layout.addStretch()
@@ -366,9 +389,34 @@ class MainWindow(QMainWindow):
             
         except Exception as e:
             self.log_message(f"加载策略参数失败: {e}")
-    
+
+    def auto_load_local_data(self):
+        """启动时及代码/日期变更时，自动从本地DB静默加载数据（不访问网络）"""
+        symbol = self.symbol_edit.text().strip()
+        if not symbol:
+            return
+
+        start_date = self.start_date_edit.date().toPyDate()
+        end_date = self.end_date_edit.date().toPyDate()
+
+        try:
+            df = self.data_query.get_stock_daily(symbol, start_date, end_date)
+            if not df.empty:
+                self.current_symbol = symbol
+                self.current_data = df
+                self.update_data_preview(df)
+                self.data_status_label.setText(f"本地数据: {len(df)} 条记录 ✓")
+                self.data_status_label.setStyleSheet("color: green; font-size: 11px;")
+                self.log_message(f"已从本地加载 {symbol} 数据: {len(df)} 条记录")
+            else:
+                self.current_data = None
+                self.data_status_label.setText('本地数据: 无，请点击"从网络更新数据"')
+                self.data_status_label.setStyleSheet("color: orange; font-size: 11px;")
+        except Exception:
+            pass  # 静默失败，不打扰用户
+
     def fetch_data(self):
-        """获取数据"""
+        """从网络获取并更新数据，同时保存到本地DB"""
         symbol = self.symbol_edit.text().strip()
         if not symbol:
             QMessageBox.warning(self, "警告", "请输入股票代码")
@@ -377,36 +425,38 @@ class MainWindow(QMainWindow):
         start_date = self.start_date_edit.date().toPyDate()
         end_date = self.end_date_edit.date().toPyDate()
         
-        self.log_message(f"开始获取数据: {symbol}, {start_date} 到 {end_date}")
+        self.log_message(f"从网络获取数据: {symbol}, {start_date} 到 {end_date}")
+        self.fetch_button.setEnabled(False)
+        self.fetch_button.setText("获取中...")
         
         try:
-            # 尝试从本地获取数据
+            days = (end_date - start_date).days
+            success = self.data_fetcher.fetch_and_store_data(symbol, days)
+            
+            if success:
+                self.log_message("网络数据获取成功，已保存到本地数据库")
+            else:
+                self.log_message("网络数据获取失败，尝试使用本地已有数据")
+
+            # 无论网络成功与否，都从DB读取
             df = self.data_query.get_stock_daily(symbol, start_date, end_date)
-            
-            if df.empty:
-                self.log_message(f"本地无数据，尝试从网络获取...")
-                # 计算需要获取的天数
-                days = (end_date - start_date).days
-                success = self.data_fetcher.fetch_and_store_data(symbol, days)
-                
-                if success:
-                    self.log_message(f"数据获取成功，重新读取...")
-                    df = self.data_query.get_stock_daily(symbol, start_date, end_date)
-                else:
-                    self.log_message(f"数据获取失败")
-                    return
-            
-            # 保存数据
-            self.current_symbol = symbol
-            self.current_data = df
-            
-            # 更新预览
-            self.update_data_preview(df)
-            
-            self.log_message(f"数据加载完成: {len(df)} 条记录")
+            if not df.empty:
+                self.current_symbol = symbol
+                self.current_data = df
+                self.update_data_preview(df)
+                self.data_status_label.setText(f"本地数据: {len(df)} 条记录 ✓")
+                self.data_status_label.setStyleSheet("color: green; font-size: 11px;")
+                self.log_message(f"数据加载完成: {len(df)} 条记录")
+            else:
+                self.data_status_label.setText("本地数据: 无可用数据")
+                self.data_status_label.setStyleSheet("color: red; font-size: 11px;")
+                self.log_message("未能获取任何数据")
             
         except Exception as e:
             self.log_message(f"获取数据失败: {e}")
+        finally:
+            self.fetch_button.setEnabled(True)
+            self.fetch_button.setText("从网络更新数据")
     
     def update_data_preview(self, df):
         """更新数据预览"""
@@ -432,7 +482,25 @@ class MainWindow(QMainWindow):
             return
         
         if self.current_data is None or self.current_data.empty:
-            QMessageBox.warning(self, "警告", "请先获取数据")
+            # 先尝试本地DB
+            self.auto_load_local_data()
+
+        if self.current_data is None or self.current_data.empty:
+            # 本地也没有，自动从网络抓取
+            self.log_message("本地无数据，自动从网络获取...")
+            symbol = self.symbol_edit.text().strip()
+            start_date = self.start_date_edit.date().toPyDate()
+            end_date = self.end_date_edit.date().toPyDate()
+            days = (end_date - start_date).days
+            try:
+                success = self.data_fetcher.fetch_and_store_data(symbol, days)
+                if success:
+                    self.auto_load_local_data()
+            except Exception as e:
+                self.log_message(f"自动获取数据失败: {e}")
+
+        if self.current_data is None or self.current_data.empty:
+            QMessageBox.warning(self, "警告", "无法获取数据，请检查股票代码或网络连接")
             return
         
         if self.backtest_thread and self.backtest_thread.isRunning():
@@ -472,6 +540,9 @@ class MainWindow(QMainWindow):
             # 禁用运行按钮
             self.run_button.setEnabled(False)
             self.run_button.setText("运行中...")
+
+            # 清空上次图表
+            self.chart_widget.clear_charts()
             
             # 启动线程
             self.backtest_thread.start()
@@ -499,6 +570,11 @@ class MainWindow(QMainWindow):
         
         # 显示结果
         self.display_results(result)
+
+        # 可视化图表
+        self.chart_widget.update_charts(result, self.current_data)
+        # 自动跳到图表页
+        self.right_tab_widget.setCurrentWidget(self.chart_widget)
         
         self.log_message("回测完成!")
     

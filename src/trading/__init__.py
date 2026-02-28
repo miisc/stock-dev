@@ -15,7 +15,7 @@ from .strategy_config import (
     StrategyConfig, StrategyParameter, StrategyConfigManager, 
     strategy_config_manager
 )
-from .strategies import DualMovingAverageStrategy
+from .strategies import DualMovingAverageStrategy, RSIStrategy
 
 __all__ = [
     'BarData',
@@ -31,5 +31,6 @@ __all__ = [
     'StrategyParameter',
     'StrategyConfigManager',
     'strategy_config_manager',
-    'DualMovingAverageStrategy'
+    'DualMovingAverageStrategy',
+    'RSIStrategy',
 ]

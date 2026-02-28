@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from loguru import logger
 
 from .strategy import Strategy
-from .strategies import DualMovingAverageStrategy
+from .strategies import DualMovingAverageStrategy, RSIStrategy
 
 
 @dataclass
@@ -231,7 +231,79 @@ class StrategyConfigManager:
                 )
             }
         ))
-    
+
+        # 注册 RSI 策略
+        self.register_strategy(StrategyConfig(
+            strategy_id="rsi",
+            strategy_class=RSIStrategy,
+            name="RSI 策略",
+            description="基于相对强弱指数（RSI）的超买超卖均值回归策略",
+            parameters={
+                "rsi_period": StrategyParameter(
+                    name="rsi_period",
+                    type=int,
+                    default_value=14,
+                    description="RSI 计算周期",
+                    min_value=2,
+                    max_value=100
+                ),
+                "oversold": StrategyParameter(
+                    name="oversold",
+                    type=int,
+                    default_value=30,
+                    description="超卖阈值（RSI 低于此值视为超卖）",
+                    min_value=1,
+                    max_value=49
+                ),
+                "overbought": StrategyParameter(
+                    name="overbought",
+                    type=int,
+                    default_value=70,
+                    description="超买阈值（RSI 高于此值视为超买）",
+                    min_value=51,
+                    max_value=99
+                ),
+                "position_size": StrategyParameter(
+                    name="position_size",
+                    type=int,
+                    default_value=100,
+                    description="每次交易数量",
+                    min_value=1,
+                    max_value=10000
+                ),
+                "min_hold_bars": StrategyParameter(
+                    name="min_hold_bars",
+                    type=int,
+                    default_value=3,
+                    description="最少持仓 K 线数",
+                    min_value=0,
+                    max_value=100
+                ),
+                "stop_loss_pct": StrategyParameter(
+                    name="stop_loss_pct",
+                    type=float,
+                    default_value=0.05,
+                    description="止损百分比",
+                    min_value=0.01,
+                    max_value=0.5
+                ),
+                "take_profit_pct": StrategyParameter(
+                    name="take_profit_pct",
+                    type=float,
+                    default_value=0.15,
+                    description="止盈百分比",
+                    min_value=0.01,
+                    max_value=1.0
+                ),
+                "rsi_smooth": StrategyParameter(
+                    name="rsi_smooth",
+                    type=bool,
+                    default_value=True,
+                    description="使用 Wilder 平滑法（True）或简单均值（False）"
+                )
+            }
+        ))
+
     def register_strategy(self, config: StrategyConfig):
         """
         注册策略配置
