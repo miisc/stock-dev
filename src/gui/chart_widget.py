@@ -295,13 +295,146 @@ class TradeDistributionWidget(_BaseFigureWidget):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 主容器：三合一标签页
+# 图4：K线图（OHLC 蜡烛图）
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CandlestickWidget(_BaseFigureWidget):
+    """OHLC 蜡烛图 + 成交量 + 买卖信号"""
+
+    def plot(self, result: "BacktestResult", price_df: Optional[pd.DataFrame] = None) -> None:
+        self.figure.clear()
+
+        if price_df is None or price_df.empty:
+            ax = self.figure.add_subplot(111)
+            ax.text(0.5, 0.5, "暂无 OHLC 数据（需传入含 open/high/low/close 列的 DataFrame）",
+                    ha="center", va="center", fontsize=12, color="#888")
+            _apply_dark_style(self.figure, [ax])
+            self._redraw()
+            return
+
+        # 列名规范化
+        col_map = {}
+        for col in price_df.columns:
+            cl = col.lower()
+            if cl in ("open", "开盘", "open_price"):
+                col_map["open"] = col
+            elif cl in ("high", "最高", "high_price"):
+                col_map["high"] = col
+            elif cl in ("low", "最低", "low_price"):
+                col_map["low"] = col
+            elif cl in ("close", "收盘", "close_price"):
+                col_map["close"] = col
+            elif cl in ("volume", "成交量", "vol"):
+                col_map["volume"] = col
+
+        has_ohlc = all(k in col_map for k in ("open", "high", "low", "close"))
+        has_vol  = "volume" in col_map
+
+        gs_ratios = [4, 1] if has_vol else [1]
+        n_rows = 2 if has_vol else 1
+        gs = self.figure.add_gridspec(n_rows, 1, height_ratios=gs_ratios, hspace=0.05)
+        ax_k = self.figure.add_subplot(gs[0])
+        ax_v = self.figure.add_subplot(gs[1], sharex=ax_k) if has_vol else None
+
+        # 确保索引是 DatetimeIndex
+        idx = price_df.index
+        if not isinstance(idx, pd.DatetimeIndex):
+            idx = pd.to_datetime(idx)
+
+        x = np.arange(len(idx))
+
+        if has_ohlc:
+            opens  = price_df[col_map["open"]].values.astype(float)
+            highs  = price_df[col_map["high"]].values.astype(float)
+            lows   = price_df[col_map["low"]].values.astype(float)
+            closes = price_df[col_map["close"]].values.astype(float)
+
+            up   = closes >= opens
+            col_up   = "#ef5350"  # 阳线（红）
+            col_down = "#26a69a"  # 阴线（绿）
+
+            # 画实体和影线
+            width  = 0.6
+            width2 = 0.08
+
+            ax_k.bar(x[up],   closes[up]  - opens[up],   width,  bottom=opens[up],   color=col_up,   zorder=3)
+            ax_k.bar(x[~up],  opens[~up]  - closes[~up], width,  bottom=closes[~up], color=col_down, zorder=3)
+            ax_k.bar(x,       highs - np.maximum(opens, closes), width2,
+                     bottom=np.maximum(opens, closes), color=np.where(up, col_up, col_down), zorder=3)
+            ax_k.bar(x,       np.minimum(opens, closes) - lows, width2,
+                     bottom=lows, color=np.where(up, col_up, col_down), zorder=3)
+        else:
+            # fallback：只画收盘价折线
+            close_col = col_map.get("close", price_df.columns[0])
+            ax_k.plot(x, price_df[close_col].values, color="#90caf9", linewidth=1.2)
+
+        # 交易信号叠加
+        signals = result.signals or []
+        dt_to_x = {pd.Timestamp(t): xi for xi, t in enumerate(idx)}
+        buy_xs, buy_ps, sell_xs, sell_ps = [], [], [], []
+        for sig in signals:
+            if not hasattr(sig, "timestamp") or not hasattr(sig, "price"):
+                continue
+            t = pd.Timestamp(sig.timestamp)
+            xi = dt_to_x.get(t)
+            if xi is None:
+                # 找最近
+                diffs = np.abs(np.array([(t - ti).total_seconds() for ti in idx]))
+                if diffs.min() < 86400:
+                    xi = int(np.argmin(diffs))
+                else:
+                    continue
+            d = getattr(sig, "direction", None)
+            if d is None:
+                continue
+            ds = d.value if hasattr(d, "value") else str(d)
+            if "long" in ds.lower() or "buy" in ds.lower():
+                buy_xs.append(xi); buy_ps.append(sig.price)
+            elif "short" in ds.lower() or "sell" in ds.lower():
+                sell_xs.append(xi); sell_ps.append(sig.price)
+
+        if buy_xs:
+            ax_k.scatter(buy_xs, buy_ps, marker="^", color="#66bb6a", s=80, zorder=5,
+                         label=f"买入 ({len(buy_xs)})")
+        if sell_xs:
+            ax_k.scatter(sell_xs, sell_ps, marker="v", color="#ef5350", s=80, zorder=5,
+                         label=f"卖出 ({len(sell_xs)})")
+
+        # X 轴刻度：每隔一段显示日期
+        step = max(1, len(idx) // 8)
+        tick_locs = x[::step]
+        tick_lbls = [idx[i].strftime("%Y-%m") for i in tick_locs]
+        ax_k.set_xticks(tick_locs)
+        ax_k.set_xticklabels(tick_lbls, rotation=30, fontsize=7)
+        ax_k.set_title(f"K线图 — {', '.join(result.symbols)}", fontsize=10)
+        ax_k.set_ylabel("价格 (元)")
+        if buy_xs or sell_xs:
+            ax_k.legend(loc="upper left", fontsize=8, framealpha=0.3)
+
+        # 成交量柱
+        if ax_v is not None and has_vol:
+            vols = price_df[col_map["volume"]].values.astype(float)
+            vol_colors = np.where(up if has_ohlc else np.ones(len(vols), bool), "#ef5350", "#26a69a")
+            ax_v.bar(x, vols, color=vol_colors, alpha=0.7)
+            ax_v.set_ylabel("成交量", fontsize=8)
+            ax_v.set_xticks([])
+
+            axes_list = [ax_k, ax_v]
+        else:
+            axes_list = [ax_k]
+
+        _apply_dark_style(self.figure, axes_list)
+        self._redraw()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 主容器：四合一标签页（新增 K线图）
 # ─────────────────────────────────────────────────────────────────────────────
 
 class BacktestChartWidget(QWidget):
     """
     回测结果可视化主控件。
-    嵌入三个图表标签页：权益曲线、交易信号、收益分布。
+    嵌入四个图表标签页：K线图、权益曲线、交易信号、收益分布。
     用法：
         widget.update_charts(result, price_df)
     """
@@ -336,14 +469,16 @@ class BacktestChartWidget(QWidget):
         """)
         layout.addWidget(self.tab_widget)
 
-        # 三个子图控件
-        self.equity_widget = EquityCurveWidget()
-        self.signal_widget = PriceSignalWidget()
-        self.dist_widget = TradeDistributionWidget()
+        # 四个子图控件
+        self.candle_widget  = CandlestickWidget()
+        self.equity_widget  = EquityCurveWidget()
+        self.signal_widget  = PriceSignalWidget()
+        self.dist_widget    = TradeDistributionWidget()
 
-        self.tab_widget.addTab(self.equity_widget, "权益曲线")
-        self.tab_widget.addTab(self.signal_widget, "交易信号")
-        self.tab_widget.addTab(self.dist_widget, "收益分布")
+        self.tab_widget.addTab(self.candle_widget,  "K线图")
+        self.tab_widget.addTab(self.equity_widget,  "权益曲线")
+        self.tab_widget.addTab(self.signal_widget,  "交易信号")
+        self.tab_widget.addTab(self.dist_widget,    "收益分布")
 
         self._result = None
         self._price_df = None
@@ -352,21 +487,22 @@ class BacktestChartWidget(QWidget):
 
     def update_charts(self, result: "BacktestResult",
                       price_df: Optional[pd.DataFrame] = None) -> None:
-        """回测完成后调用，刷新三张图"""
+        """回测完成后调用，刷新四张图"""
         self._result = result
         self._price_df = price_df
 
+        self.candle_widget.plot(result, price_df)
         self.equity_widget.plot(result)
         self.signal_widget.plot(result, price_df)
         self.dist_widget.plot(result)
 
         self.export_btn.setEnabled(True)
-        # 自动跳到权益曲线页
+        # 自动跳到 K线图页
         self.tab_widget.setCurrentIndex(0)
 
     def clear_charts(self) -> None:
         """清空所有图表"""
-        for w in (self.equity_widget, self.signal_widget, self.dist_widget):
+        for w in (self.candle_widget, self.equity_widget, self.signal_widget, self.dist_widget):
             w.clear()
         self.export_btn.setEnabled(False)
 
