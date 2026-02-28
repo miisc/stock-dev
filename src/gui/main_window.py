@@ -21,9 +21,13 @@ from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont
 
 from ..data.universe import manager as universe_manager
-from .universe_panel import UniversePanel
-from .backtest_panel import BacktestPanel
-from .result_panel   import ResultPanel
+from .universe_panel  import UniversePanel
+from .backtest_panel  import BacktestPanel
+from .result_panel    import ResultPanel
+from .strategy_panel  import StrategyPanel
+from .realtime_panel  import RealtimePanel
+from .strategy_panel import StrategyPanel
+from .realtime_panel import RealtimePanel
 
 
 class MainWindow(QMainWindow):
@@ -67,6 +71,22 @@ class MainWindow(QMainWindow):
         # ── Tab3：结果查看 ─────────────────────────────────────────────
         self.result_panel = ResultPanel()
         self.tab_widget.addTab(self.result_panel, "📈 结果查看")
+
+        # ── Tab4：策略配置 ─────────────────────────────────────────────
+        self.strategy_panel = StrategyPanel()
+        self.tab_widget.addTab(self.strategy_panel, "⚙️ 策略配置")
+
+        # ── Tab5：实时行情 ─────────────────────────────────────────────
+        self.realtime_panel = RealtimePanel()
+        self.tab_widget.addTab(self.realtime_panel, "📡 实时行情")
+
+        # ── Tab4：策略配置 ─────────────────────────────────────────────
+        self.strategy_panel = StrategyPanel()
+        self.tab_widget.addTab(self.strategy_panel, "⚙ 策略配置")
+
+        # ── Tab5：实时行情 ─────────────────────────────────────────────
+        self.realtime_panel = RealtimePanel()
+        self.tab_widget.addTab(self.realtime_panel, "📡 实时行情")
 
         # ── 跨面板信号连接 ────────────────────────────────────────────
         # 数据更新 → 回测面板刷新股票列表

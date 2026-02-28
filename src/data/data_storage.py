@@ -4,6 +4,7 @@
 """
 
 import pandas as pd
+from datetime import datetime
 from typing import Optional, List
 from pathlib import Path
 from loguru import logger
@@ -140,16 +141,26 @@ class DataStorage:
         """
         try:
             result = self.db_manager.execute_query(
-                "SELECT COUNT(*) as count FROM stock_daily WHERE ts_code = ? AND trade_date BETWEEN ? AND ?",
+                "SELECT COUNT(*) as count, MAX(trade_date) as max_date "
+                "FROM stock_daily WHERE ts_code = ? AND trade_date BETWEEN ? AND ?",
                 (ts_code, start_date, end_date)
             )
-            
-            count = result[0]['count'] if result else 0
-            expected_days = len(pd.date_range(start=start_date, end=end_date, freq='D'))
-            
-            # 考虑到非交易日，如果存在超过一半的日期，认为数据存在
-            return count > expected_days * 0.4
-            
+
+            count    = result[0]['count']    if result else 0
+            max_date = result[0]['max_date'] if result else None
+
+            if count == 0 or max_date is None:
+                return False
+
+            # 判断本地数据是否"足够新"：最新一条记录距 end_date 不超过 7 个自然日
+            # 这样即使股票刚上市（历史不足请求范围），只要数据已是最新就跳过重复下载
+            fmt = '%Y%m%d'
+            end_dt = datetime.strptime(end_date.replace('-', ''), fmt)
+            max_dt = datetime.strptime(max_date.replace('-', ''), fmt)
+            days_behind = (end_dt - max_dt).days
+
+            return days_behind <= 7
+
         except Exception as e:
             logger.error(f"检查数据存在性失败: {str(e)}")
             return False

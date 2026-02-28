@@ -63,20 +63,56 @@ class DownloadWorker(QThread):
             storage = DataStorage(DB_PATH)
             self._downloader = BatchDownloader(storage=storage, concurrency=3)
 
+            # ── 预检本地数据，过滤已有数据的股票 ──────────────────────────
+            start_clean = self.start_date.replace("-", "")
+            end_clean   = self.end_date.replace("-", "")
+            need_download: list = []
+            skipped_codes: list = []
+            self.log.emit(f"检查本地数据（共 {len(self.ts_codes)} 只）…")
+            for ts in self.ts_codes:
+                try:
+                    exists = storage.check_data_exists(ts, start_clean, end_clean)
+                except Exception:
+                    exists = False
+                if exists:
+                    skipped_codes.append(ts)
+                else:
+                    need_download.append(ts)
+
+            if skipped_codes:
+                self.log.emit(
+                    f"本地已有完整数据，跳过 {len(skipped_codes)} 只，"
+                    f"需下载 {len(need_download)} 只"
+                )
+            else:
+                self.log.emit(f"本地无缓存，需下载全部 {len(need_download)} 只")
+
+            if not need_download:
+                self.log.emit("所有股票本地数据已是最新，无需网络请求")
+                self.finished.emit({
+                    "total": 0, "done": 0, "successes": 0,
+                    "failures": [], "skipped": len(skipped_codes),
+                })
+                return
+
+            # 更新进度条上限为实际需下载数
+            self.progress.emit(0, len(need_download), "")
+
             def on_progress(done, total, ts):
                 self.progress.emit(done, total, ts)
                 self.log.emit(f"  [{done}/{total}] {ts}")
 
             result = self._downloader.download(
-                self.ts_codes,
+                need_download,
                 self.start_date,
                 self.end_date,
                 progress_callback=on_progress,
             )
+            result["skipped"] = len(skipped_codes)
             self.finished.emit(result)
         except Exception as exc:
             self.log.emit(f"下载出错: {exc}")
-            self.finished.emit({"total": 0, "done": 0, "successes": 0, "failures": []})
+            self.finished.emit({"total": 0, "done": 0, "successes": 0, "failures": [], "skipped": 0})
 
     def cancel(self):
         if self._downloader:
@@ -254,10 +290,10 @@ class UniversePanel(QWidget):
         start = self.start_date_edit.date().toString("yyyy-MM-dd")
         end   = self.end_date_edit.date().toString("yyyy-MM-dd")
 
-        self._log(f"开始下载 {len(codes)} 只股票 ({start} ~ {end})…")
+        self._log(f"准备下载 {len(codes)} 只股票 ({start} ~ {end})，正在检查本地数据…")
         self.fail_table.setRowCount(0)
         self.progress_bar.setValue(0)
-        self.progress_bar.setMaximum(len(codes))
+        self.progress_bar.setMaximum(len(codes))  # 初始上限，Worker 预检后会更新
 
         # 启动 Worker
         self._worker = DownloadWorker(codes, start, end)
@@ -285,13 +321,18 @@ class UniversePanel(QWidget):
         successes = result.get("successes", 0)
         failures  = result.get("failures", [])
         total     = result.get("total", 0)
+        skipped   = result.get("skipped", 0)
 
-        self._log(
-            f"下载完成：成功 {successes}/{total}，"
-            f"失败 {len(failures)} 只"
-        )
+        parts = [f"成功 {successes}/{total}"]
+        if skipped:
+            parts.append(f"本地跳过 {skipped} 只")
+        if failures:
+            parts.append(f"失败 {len(failures)} 只")
+        self._log("下载完成：" + "，".join(parts))
         self.progress_label.setText(
-            f"完成：{successes}/{total} 成功，{len(failures)} 失败"
+            f"完成：{successes}/{total} 成功"
+            + (f"，跳过 {skipped}" if skipped else "")
+            + (f"，失败 {len(failures)}" if failures else "")
         )
 
         # 填充失败列表
