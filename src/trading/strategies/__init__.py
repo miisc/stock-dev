@@ -5,7 +5,9 @@
 """
 
 from .dual_ma import DualMovingAverageStrategy
+from .rsi import RSIStrategy
 
 __all__ = [
-    'DualMovingAverageStrategy'
+    'DualMovingAverageStrategy',
+    'RSIStrategy',
 ]

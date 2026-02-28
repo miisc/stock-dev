@@ -1,7 +1,7 @@
 # 数据获取和处理
 pandas>=2.0.0
+akshare>=1.0.0
 numpy>=1.24.0
-tushare>=1.4.0
 
 # 数据可视化
 matplotlib>=3.7.0
@@ -44,3 +44,4 @@ mypy>=1.7.0
 # Jupyter支持（可选）
 jupyter>=1.0.0
 ipykernel>=6.26.0
+
