@@ -70,7 +70,7 @@ class AKShareSource(DataSource):
                 start_date_formatted = start_date.replace('-', '')
                 end_date_formatted = end_date.replace('-', '')
                 
-                df = ak.stock_zh_a_daily(symbol=ak_symbol, start_date=start_date_formatted, end_date=end_date_formatted)
+                df = ak.stock_zh_a_daily(symbol=ak_symbol, start_date=start_date_formatted, end_date=end_date_formatted, adjust="qfq")
                 
                 if not df.empty:
                     logger.info(f"新浪财经接口成功获取 {len(df)} 条数据")

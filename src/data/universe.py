@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime, date
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -112,12 +113,31 @@ class UniverseManager:
         except Exception:
             pass
 
+    # ----------------- 内部工具 -----------------
+    @staticmethod
+    def _call_with_retry(func, kwargs: dict, max_retries: int = 3, base_delay: float = 2.0):
+        """带指数退让的重试调用，针对瞬态网络错误"""
+        last_err = None
+        for attempt in range(max_retries):
+            try:
+                return func(**kwargs)
+            except Exception as e:
+                last_err = e
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(
+                        f"{func.__name__} 第 {attempt + 1}/{max_retries} 次失败: {e}，"
+                        f"{delay:.1f}s 后重试..."
+                    )
+                    time.sleep(delay)
+        raise last_err
+
     # ----------------- akshare 获取实现 -----------------
     def _fetch_all_a(self) -> List[str]:
         """使用 akshare 获取当前在市的全部 A 股（spot 列表）"""
         # ak.stock_zh_a_spot_em 通常返回当前上市的股票
         try:
-            df = ak.stock_zh_a_spot_em()
+            df = self._call_with_retry(ak.stock_zh_a_spot_em, {})
         except Exception as e:
             logger.error(f"调用 ak.stock_zh_a_spot_em 失败: {e}")
             raise
@@ -151,7 +171,7 @@ class UniverseManager:
                 continue
             func = getattr(ak, name)
             try:
-                df = func(**kwargs)
+                df = self._call_with_retry(func, kwargs)
                 if df is None or (isinstance(df, list) and not df):
                     continue
 

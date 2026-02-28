@@ -100,6 +100,33 @@ class DatabaseManager:
                 INSERT OR IGNORE INTO account (id, total_assets, available_cash, position_value, update_time)
                 VALUES (1, 100000, 100000, 0, datetime('now'))
             """)
+
+            # Add composite index for performance
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_stock_daily_code_date 
+                ON stock_daily (ts_code, trade_date)
+            """)
+
+            # Backtest results table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS backtest_results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    strategy_name TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    start_date TEXT NOT NULL,
+                    end_date TEXT NOT NULL,
+                    initial_cash REAL NOT NULL,
+                    final_value REAL,
+                    total_return REAL,
+                    annual_return REAL,
+                    max_drawdown REAL,
+                    sharpe_ratio REAL,
+                    total_trades INTEGER,
+                    win_rate REAL,
+                    config_json TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+            """)
             
             conn.commit()
     
@@ -156,6 +183,65 @@ class DatabaseManager:
         with self.get_connection() as conn:
             df.to_sql(table_name, conn, if_exists=if_exists, index=False)
     
+    def save_backtest_result(
+        self,
+        strategy_name: str,
+        symbol: str,
+        start_date: str,
+        end_date: str,
+        initial_cash: float,
+        final_value: float,
+        metrics: Dict[str, Any],
+        config_json: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        """将单只股票的回测结果写入 backtest_results 表
+
+        Args:
+            strategy_name: 策略名称
+            symbol: 股票代码
+            start_date: 回测开始日期 (YYYYMMDD)
+            end_date: 回测结束日期 (YYYYMMDD)
+            initial_cash: 初始资金
+            final_value: 最终资产价值
+            metrics: PerformanceMetrics.to_dict() 的结果
+            config_json: 可选的配置 JSON 字典
+
+        Returns:
+            新插入行的 rowid
+        """
+        import json
+
+        config_str = json.dumps(config_json, ensure_ascii=False) if config_json else None
+
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO backtest_results
+                    (strategy_name, symbol, start_date, end_date,
+                     initial_cash, final_value,
+                     total_return, annual_return, max_drawdown,
+                     sharpe_ratio, total_trades, win_rate, config_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    strategy_name,
+                    symbol,
+                    start_date,
+                    end_date,
+                    initial_cash,
+                    final_value,
+                    metrics.get("total_return"),
+                    metrics.get("annual_return"),
+                    metrics.get("max_drawdown"),
+                    metrics.get("sharpe_ratio"),
+                    metrics.get("total_trades"),
+                    metrics.get("win_rate"),
+                    config_str,
+                ),
+            )
+            conn.commit()
+            return cursor.lastrowid
+
     def get_stock_data(self, ts_code: str, start_date: str = None, end_date: str = None) -> pd.DataFrame:
         """
         获取股票日线数据

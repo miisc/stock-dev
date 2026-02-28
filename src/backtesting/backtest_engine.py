@@ -71,6 +71,8 @@ class BacktestEngine:
         self.signals: List[Signal] = []
         self.trades: List[Dict[str, Any]] = []
         self.daily_portfolio: List[Dict[str, Any]] = []
+        # 待执行订单（当日生成信号，次日开盘执行，避免前视偏差）
+        self.pending_orders: List[Signal] = []
         
         logger.info(f"回测引擎初始化完成，时间范围: {config.start_date} 到 {config.end_date}")
     
@@ -155,11 +157,13 @@ class BacktestEngine:
             if self.config.progress_callback:
                 self.config.progress_callback(i + 1, len(sorted_dates))
             
-            # 获取当日所有股票的K线数据
+            # 获取当日所有股票的K线数据，同时收集今日开盘价
             daily_bars = []
+            today_open_prices: Dict[str, float] = {}
             for symbol, df in data_dict.items():
                 if date in df.index:
                     row = df.loc[date]
+                    today_open_prices[symbol] = float(row['open'])
                     bar = BarData(
                         symbol=symbol,
                         datetime=date,
@@ -171,15 +175,18 @@ class BacktestEngine:
                     )
                     daily_bars.append(bar)
             
-            # 更新策略
+            # 执行前一交易日收集的待执行订单（以今日开盘价成交，消除前视偏差）
+            self._execute_pending_orders(today_open_prices)
+            
+            # 更新策略（今日K线数据喂入策略，策略产生信号）
             for bar in daily_bars:
                 self.current_bar = bar
                 strategy.update_bar(bar)
             
-            # 处理交易信号
-            self._process_signals(strategy)
+            # 收集今日新信号到 pending_orders，次日开盘执行
+            self._collect_signals(strategy)
             
-            # 更新每日组合价值
+            # 更新每日组合价值（使用今日收盘价）
             self._update_daily_portfolio(date, data_dict)
             
             # 定期输出进度
@@ -205,33 +212,34 @@ class BacktestEngine:
         self.signals = []
         self.trades = []
         self.daily_portfolio = []
+        self.pending_orders = []
         
         # 重置组件状态
         self.executor.reset()
         self.position_manager.reset()
     
-    def _process_signals(self, strategy: Strategy):
-        """处理交易信号"""
-        # 获取策略信号
-        new_signals = strategy.signals
-        
-        # 过滤已处理的信号
-        new_signals = [s for s in new_signals if s not in self.signals]
-        
-        # 执行交易
-        for signal in new_signals:
+    def _execute_pending_orders(self, open_prices: Dict[str, float]):
+        """以今日开盘价执行前一交易日收集的待执行订单（消除前视偏差）"""
+        for signal in self.pending_orders:
+            open_price = open_prices.get(signal.symbol)
+            if open_price is None:
+                logger.warning(f"无法获取 {signal.symbol} 今日开盘价，跳过信号执行")
+                continue
             trade = self.executor.execute_signal(
-                signal, 
+                signal,
                 self.position_manager,
-                self.current_bar.close
+                open_price
             )
-            
             if trade:
                 self.trades.append(trade)
-                logger.debug(f"执行交易: {signal.symbol} {signal.direction.value} "
-                           f"@ {signal.price:.2f} x {signal.volume}")
-        
-        # 保存信号
+                logger.debug(f"次日开盘执行: {signal.symbol} {signal.direction.value} "
+                             f"@ {open_price:.2f} x {signal.volume}")
+        self.pending_orders.clear()
+
+    def _collect_signals(self, strategy: Strategy):
+        """收集策略今日产生的新信号，存入 pending_orders，次日开盘执行"""
+        new_signals = [s for s in strategy.signals if s not in self.signals]
+        self.pending_orders.extend(new_signals)
         self.signals.extend(new_signals)
     
     def _update_daily_portfolio(self, date: datetime, data_dict: Dict[str, pd.DataFrame]):

@@ -9,6 +9,7 @@ from .result import BacktestResult
 from .executor import ExecutionExecutor
 from .position_manager import PositionManager
 from .cost_model import CostModel
+from .batch_runner import BatchRunner
 
 __all__ = [
     "BacktestEngine",
@@ -16,5 +17,6 @@ __all__ = [
     "BacktestResult",
     "ExecutionExecutor",
     "PositionManager",
-    "CostModel"
+    "CostModel",
+    "BatchRunner",
 ]

@@ -88,7 +88,8 @@ class ExecutionExecutor:
             execution_price = self._calculate_execution_price(signal, market_price)
             
             # 计算交易成本
-            commission = self.cost_model.calculate_commission(signal.volume * execution_price)
+            is_sell = signal.direction == Direction.SELL
+            commission = self.cost_model.calculate_commission(signal.volume * execution_price, is_sell=is_sell)
             slippage = self.cost_model.calculate_slippage(signal.volume * execution_price)
             total_cost = commission + slippage
             

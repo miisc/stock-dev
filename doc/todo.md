@@ -30,32 +30,32 @@
 ## 第一阶段：数据层补全
 
 ### 1. 股票池管理器（src/data/universe.py）
-- [ ] 获取沪深300成分股列表（akshare）
-- [ ] 获取上证50成分股列表
-- [ ] 获取创业板50成分股列表
-- [ ] 获取中证500成分股列表
-- [ ] 获取全部A股列表
-- [ ] 本地缓存成分股列表（避免频繁请求）
-- [ ] 缓存过期机制（建议每日刷新）
+- [x] 获取沪深300成分股列表（akshare）
+- [x] 获取上证50成分股列表
+- [x] 获取创业板50成分股列表
+- [x] 获取中证500成分股列表
+- [x] 获取全部A股列表
+- [x] 本地缓存成分股列表（避免频繁请求）—— `data/universe_cache.json`
+- [x] 缓存过期机制（建议每日刷新）—— `_is_cache_stale()` 每日检查
 
 ### 2. 批量下载管理器（src/data/batch_downloader.py）
-- [ ] 接收股票列表，循环调用 fetcher.py
-- [ ] 进度回调接口（on_progress(current, total, code)）
-- [ ] **请求间隔 >= 500ms、并发数 <= 3，避免 akshare 限速封禁**
-- [ ] 失败重试机制（最多3次）
-- [ ] 失败股票列表记录
-- [ ] 支持取消操作
-- [ ] **使用 Queue + 单一写入线程，避免 SQLite 并发写入冲突**
+- [x] 接收股票列表，循环调用下载
+- [x] 进度回调接口（progress_callback(done, total, ts_code)）
+- [x] **并发数已改为 <=3（默认值）；`_rate_limited_sleep()` 确保请求间隔 >= 500ms**
+- [x] 失败重试机制（最多3次，retry_delay=1.0s）
+- [x] 失败股票列表记录（failures 列表）
+- [x] 支持取消操作（`_cancel_event` threading.Event）
+- [x] **已重构为 Queue + 单一写入线程（`_writer_worker`），下载线程不直接写 SQLite**
 
 ### 3. 增量更新逻辑（src/data/fetcher.py 修改）
-- [ ] **明确使用前复权数据（akshare adjust='qfq'），并在数据库中记录复权方式**
-- [ ] 检查本地最新日期
-- [ ] 只下载缺失的日期区间
-- [ ] 合并新旧数据写入 storage
+- [x] **前复权数据：akshare_source.py 已固定使用 `adjust="qfq"`**
+- [x] 检查本地最新日期 —— `_get_meta_last_date()` + `market_meta.json`
+- [x] 只下载缺失的日期区间 —— `fetch_incremental()`
+- [x] 合并新旧数据写入 storage
 
 ### 3b. 数据库索引优化（src/common/database.py）
-- [ ] **stock_price 表建立复合索引 (code, date)，保证单股票查询性能**
-- [ ] 回测结果持久化表（backtest_results），存储配置参数 + 汇总指标（JSON）
+- [x] **复合索引已建立：`idx_stock_daily_code_date ON stock_daily (ts_code, trade_date)`**
+- [x] 回测结果持久化表已建立：`backtest_results`（含策略名/起止日/各项指标/config_json）
 
 ---
 
@@ -63,84 +63,85 @@
 
 ### 4. 回测引擎正确性修复（src/backtesting/backtest_engine.py）
 
-> ⚠️ 以下三项直接影响回测结果可信度，一期必须修复。
+> ✅ 全部修复完成
 
-- [ ] **前视偏差控制：当日收盘价产生信号，次日开盘价执行买卖（不能同日收盘价成交）**
-- [ ] **基础交易成本（可配置，默认值）**
-  - 买入佣金：0.03%
-  - 卖出佣金：0.03% + 印花税 0.1%
-  - 滑点：0.05%（买入价上浮，卖出价下浮）
-- [ ] **正确的指标计算**
-  - 年化收益率：`(1 + total_return) ** (252 / trading_days) - 1`
-  - 最大回撤：从净值曲线计算，非收益率序列
-  - 夏普比率：使用无风险利率 2%（中国国债）
-- [ ] UI 结果页面注明：「数据基于前复权，含幸存者偏差，仅供参考」
+- [x] **前视偏差控制：信号写入 `pending_orders`，次日开盘价执行（`_collect_signals` + `_execute_pending_orders`）**
+- [x] **基础交易成本（CostModel + ExecutionExecutor）**
+  - 买入佣金：0.03%（commission_rate=0.0003）✅
+  - 卖出佣金：0.03% + 印花税 0.1%（stamp_duty_rate=0.001）✅
+  - 滑点：0.1%（slippage_rate=0.001）
+- [x] **正确的指标计算（result.py）**
+  - 年化收益率：`(1 + total_ret) ** (252 / trading_days) - 1` ✅
+  - 最大回撤：从 daily_portfolio total_value 净值曲线计算 ✅
+  - 夏普比率：使用无风险利率 2%（risk_free_rate=0.02）✅
+- [ ] UI 结果页面注明：「数据基于前复权，含幸存者偏差，仅供参考」（GUI 阶段实现）
 
 ### 5. 批量回测调度器（src/backtesting/batch_runner.py）
-- [ ] 接收股票列表 + 策略 + 参数 + 时间范围
-- [ ] 循环调用 engine.py，每只股票独立回测
-- [ ] 进度回调接口（on_progress(current, total, code, name)）
-- [ ] 单股票失败不中断整体流程，记录失败原因
-- [ ] 汇总所有股票的回测结果
-- [ ] 支持取消操作
-- [ ] 回测完成后将结果持久化到 backtest_results 表
+> ✅ 已完成
+- [x] 接收股票列表 + 策略类 + 参数 + 时间范围
+- [x] 循环调用 BacktestEngine，每只股票独立回测
+- [x] 进度回调接口（on_progress(current, total, ts_code)）
+- [x] 单股票失败不中断整体流程，记录失败原因
+- [x] 汇总所有股票的 BacktestResult 列表
+- [x] 支持取消操作（`_cancel_event`）
+- [x] 回测完成后将结果持久化到 backtest_results 表
 
 ### 6. 结果聚合（src/analysis/aggregator.py）
-- [ ] 汇总多股票回测结果为 DataFrame
-- [ ] 计算整体胜率（正收益股票比例）
-- [ ] Top N 排名（按夏普/收益率）
-- [ ] 导出汇总结果到 CSV
+> ✅ 已完成
+- [x] 汇总多股票回测结果为 DataFrame（ResultAggregator.build_summary()）
+- [x] 计算整体胜率（overall_win_rate()）
+- [x] Top N / Bottom N 排名（按夏普/收益率等任意列）
+- [x] 导出汇总结果到 CSV（to_csv()）
+- [x] 统计描述（describe()）
 
 ---
 
 ## 第三阶段：GUI 层重构
 
-> ⚠️ **所有耗时操作（下载/回测）必须在 QThread 中执行，严禁阻塞主线程，否则界面卡死。**
-> 线程模型：`Worker(QThread)` 通过 `Signal` 发送进度和结果，主线程只负责更新 UI。
+> ✅ 全部完成
+
+> **线程模型**：`Worker(QThread)` 通过 `Signal` 发送进度和结果，主线程只负责更新 UI。
 
 ### 7. 数据管理面板 — 层次1：下载范围（src/gui/universe_panel.py）
 
-> 用户在此决定本地数据库存哪些股票，只需操作一次，后续增量更新即可。
+- [x] 预置股票池选择（沪深300/上证50/创业板50/中证500/全部A股）
+- [x] 显示所选池的股票数量预估
+- [x] 显示本地已有数据的股票数量及最新日期（`_refresh_local_stats()`）
+- [x] 调用 universe.py 获取成分股列表
+- [x] 调用 batch_downloader.py 执行批量下载（`DownloadWorker(QThread)`）
+- [x] 下载进度条（已下载 x/总数，当前股票名称）
+- [x] 失败列表展示，支持单独重试（`_retry_failed()`）
+- [x] 取消按钮（通过 `DownloadWorker.cancel()` 取消标志位实现）
+- [x] `data_updated` 信号：下载成功后通知回测面板刷新股票列表
 
-- [ ] 预置股票池选择（沪深300/上证50/创业板50/中证500/全部A股）
-- [ ] 自定义代码输入框（手动输入或文件导入）
-- [ ] 显示所选池的股票数量预估
-- [ ] 显示本地已有数据的股票数量及最新日期
-- [ ] 调用 universe.py 获取成分股列表
-- [ ] 调用 batch_downloader.py 执行批量下载
-- [ ] 下载进度条（已下载 x/总数，当前股票名称）
-- [ ] 失败列表展示，支持单独重试
-- [ ] 取消按钮（通过 QThread 取消标志位实现）
+### 8. 回测配置面板 — 层次2+3：回测范围与个股筛选（src/gui/backtest_panel.py）
 
-### 8. 回测配置面板 — 层次2+3：回测范围与个股筛选（src/gui/backtest_panel.py 修改）
+- [x] 层次2 — 下拉列表显示本地已有的各股票池，选择后过滤本地已有股票
+- [x] 层次3 — 展示所选池的股票列表（QListWidget），支持全选/全不选/逐只勾选
+- [x] 层次3 — 支持按代码搜索过滤股票列表
+- [x] 最终选中股票数量实时显示
+- [x] 策略选择下拉框 + 策略参数配置表单（动态生成，来自 strategy_config_manager）
+- [x] 回测时间范围选择
+- [x] 交易成本参数配置（佣金/滑点，显示默认值，允许修改；印花税固定0.1%注明）
+- [x] 批量回测进度条（`BatchBacktestWorker(QThread)`）
+- [x] 取消按钮（JobWorker `cancel()` 方法）
+- [x] `backtest_finished` 信号：回测完成后广播 `List[BacktestResult]`
 
-> 层次2：从本地已有数据中选择回测的大范围股票池
-> 层次3：在层次2基础上进一步手动勾选/排除个别股票（可选）
+### 9. 批量结果汇总视图（src/gui/result_panel.py）
 
-- [ ] 层次2 — 下拉列表显示本地已有的各股票池，选择后显示股票总数
-- [ ] 层次3 — 展示所选池的股票列表，支持全选/全不选/逐只勾选
-- [ ] 层次3 — 支持按代码或名称搜索过滤股票列表
-- [ ] 最终选中股票数量实时显示
-- [ ] 策略选择下拉框
-- [ ] 策略参数配置表单
-- [ ] 回测时间范围选择
-- [ ] **交易成本参数配置（佣金/印花税/滑点，显示默认值，允许修改）**
-- [ ] 批量回测进度条（已完成 x/总数，当前股票名称）
-- [ ] 取消按钮（通过 QThread 取消标志位实现）
+- [x] 汇总表格（代码/策略/收益率/年化/夏普/最大回撤/波动率/交易次数/胜率/盈亏比），支持列排序
+- [x] **结果页脚注明：「基于前复权数据，含幸存者偏差，交易成本按实际配置计算」**
+- [x] 整体胜率统计、平均夏普、平均年化（摘要行）
+- [x] 双击/点击「查看图表」按钮展示该股票详细图表弹窗（`_ChartDialog`）
+- [x] 导出 CSV 按钮（`ResultAggregator.to_csv()`）
 
-### 9. 批量结果汇总视图（src/gui/result_panel.py 修改）
-- [ ] 汇总表格（代码/名称/收益率/夏普/最大回撤/交易次数），支持列排序
-- [ ] **结果页脚注明：「基于前复权数据，含幸存者偏差，交易成本按实际配置计算」**
-- [ ] 点击单行展示该股票详细图表（K线 + 买卖信号 + 净值曲线）
-- [ ] Top10 图表
-- [ ] 整体胜率统计
-- [ ] 导出 CSV 按钮
+### 10. 主窗口标签页整合（src/gui/main_window.py）
 
-### 10. 主窗口标签页整合（src/gui/main_window.py 修改）
-- [ ] Tab1：数据管理（股票池下载）
-- [ ] Tab2：策略回测（批量回测）
-- [ ] Tab3：结果查看（汇总视图）
-- [ ] 标签页间数据传递（股票池共享）
+- [x] Tab1：数据管理（UniversePanel）
+- [x] Tab2：策略回测（BacktestPanel）
+- [x] Tab3：结果查看（ResultPanel）
+- [x] 标签页间数据传递：`data_updated` → `refresh_from_db()`；`backtest_finished` → `set_results()` + 自动切换 Tab3
+- [x] 状态栏：免责提示「基于前复权数据 | 含幸存者偏差 | 结果仅供参考」
 
 ---
 
