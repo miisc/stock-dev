@@ -67,7 +67,8 @@ class BacktestEngine:
         self.total_bars: int = 0
         self.processed_bars: int = 0
         
-        # 回测结果
+        # 回测状态
+        self._current_data_dict: Dict[str, pd.DataFrame] = {}
         self.signals: List[Signal] = []
         self.trades: List[Dict[str, Any]] = []
         self.daily_portfolio: List[Dict[str, Any]] = []
@@ -134,6 +135,7 @@ class BacktestEngine:
         
         # 加载数据
         data_dict = self.load_data(symbols)
+        self._current_data_dict = data_dict
         
         # 初始化策略
         strategy.initialize()
@@ -264,6 +266,10 @@ class BacktestEngine:
     
     def _generate_result(self, strategy: Strategy, symbols: List[str]) -> BacktestResult:
         """生成回测结果"""
+        price_df = None
+        if symbols and symbols[0] in self._current_data_dict:
+            price_df = self._current_data_dict[symbols[0]]
+        
         return BacktestResult(
             strategy_name=strategy.name,
             symbols=symbols,
@@ -274,5 +280,6 @@ class BacktestEngine:
             signals=self.signals,
             trades=self.trades,
             daily_portfolio=self.daily_portfolio,
-            benchmark=self.config.benchmark
+            benchmark=self.config.benchmark,
+            price_df=price_df
         )

@@ -178,7 +178,7 @@ class UniversePanel(QWidget):
         date_form = QFormLayout(date_group)
 
         self.start_date_edit = QDateEdit(calendarPopup=True)
-        self.start_date_edit.setDate(QDate.currentDate().addYears(-3))
+        self.start_date_edit.setDate(QDate(2025, 2, 28))
         date_form.addRow("开始日期:", self.start_date_edit)
 
         self.end_date_edit = QDateEdit(calendarPopup=True)

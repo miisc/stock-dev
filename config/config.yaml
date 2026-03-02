@@ -2,7 +2,7 @@
 
 # 数据源配置
 data_source:
-  provider: "tushare"  # 数据源提供商: tushare, akshare
+  provider: "akshare"  # 数据源提供商: tushare, akshare
   token: ""  # Tushare API token，需要在环境变量中设置
   
 # 数据存储配置

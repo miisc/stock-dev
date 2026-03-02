@@ -80,14 +80,6 @@ class MainWindow(QMainWindow):
         self.realtime_panel = RealtimePanel()
         self.tab_widget.addTab(self.realtime_panel, "📡 实时行情")
 
-        # ── Tab4：策略配置 ─────────────────────────────────────────────
-        self.strategy_panel = StrategyPanel()
-        self.tab_widget.addTab(self.strategy_panel, "⚙ 策略配置")
-
-        # ── Tab5：实时行情 ─────────────────────────────────────────────
-        self.realtime_panel = RealtimePanel()
-        self.tab_widget.addTab(self.realtime_panel, "📡 实时行情")
-
         # ── 跨面板信号连接 ────────────────────────────────────────────
         # 数据更新 → 回测面板刷新股票列表
         self.universe_panel.data_updated.connect(

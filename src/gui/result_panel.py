@@ -274,7 +274,10 @@ class _ChartDialog(QDialog):
         super().__init__(parent)
         symbol = result.symbols[0] if result.symbols else "?"
         self.setWindowTitle(f"详细图表 — {symbol}")
-        self.resize(1000, 650)
+        self.resize(1200, 800)
+        
+        # 允许最大化窗口
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint)
 
         layout = QVBoxLayout(self)
 
@@ -294,10 +297,29 @@ class _ChartDialog(QDialog):
 
         # 图表
         chart = BacktestChartWidget()
-        chart.update_charts(result, None)
+        chart.update_charts(result, result.price_df)
         layout.addWidget(chart)
 
+        # 按钮栏
+        btn_layout = QHBoxLayout()
+        
+        # 最大化/还原按钮
+        self.maximize_btn = QPushButton("最大化")
+        self.maximize_btn.clicked.connect(self.toggle_maximize)
+        btn_layout.addWidget(self.maximize_btn)
+        
         # 关闭按钮
-        btn_box = QDialogButtonBox(QDialogButtonBox.Close)
-        btn_box.rejected.connect(self.reject)
-        layout.addWidget(btn_box)
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(self.accept)
+        btn_layout.addWidget(close_btn)
+        
+        layout.addLayout(btn_layout)
+    
+    def toggle_maximize(self):
+        """切换窗口最大化状态"""
+        if self.isMaximized():
+            self.showNormal()
+            self.maximize_btn.setText("最大化")
+        else:
+            self.showMaximized()
+            self.maximize_btn.setText("还原")

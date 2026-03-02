@@ -210,7 +210,7 @@ class BacktestPanel(QWidget):
         date_form = QFormLayout(date_group)
 
         self.bt_start = QDateEdit(calendarPopup=True)
-        self.bt_start.setDate(QDate.currentDate().addYears(-3))
+        self.bt_start.setDate(QDate.currentDate().addYears(-1))
         date_form.addRow("开始日期:", self.bt_start)
 
         self.bt_end = QDateEdit(calendarPopup=True)

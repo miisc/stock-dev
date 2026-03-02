@@ -72,6 +72,7 @@ class BacktestResult:
     trades: List[Dict[str, Any]] = field(default_factory=list)
     daily_portfolio: List[Dict[str, Any]] = field(default_factory=list)
     benchmark: Optional[str] = None
+    price_df: Optional[Any] = None
     
     # 计算属性
     def __post_init__(self):
