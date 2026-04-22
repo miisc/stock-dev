@@ -110,10 +110,61 @@ class StockPoolManager:
         self._save_cache(cache_name, df)
         return df
 
+    # 合法代码正则：6 位数字，可选带 .SH/.SZ/.BJ 后缀，可选带 sh/sz/bj 前缀
+    import re as _re
+    _CODE_RE = _re.compile(
+        r'^(?:sh|sz|bj)?(\d{6})(?:\.(SH|SZ|BJ))?$',
+        _re.IGNORECASE,
+    )
+
+    @classmethod
+    def is_valid_code(cls, symbol: str) -> bool:
+        """判断单个代码是否合法（6位数字，可带交易所前缀/后缀）。"""
+        return bool(cls._CODE_RE.match(symbol.strip())) if symbol else False
+
+    @classmethod
+    def validate_codes(cls, symbols: List[str]) -> dict:
+        """
+        批量校验代码列表，返回校验结果字典。
+
+        Returns:
+            {
+                "valid": [合法且去重后的 ts_code 列表],
+                "invalid": [非法代码列表],
+                "duplicates": [因去重被移除的 ts_code 列表],
+            }
+        """
+        valid: list = []
+        invalid: list = []
+        seen: set = set()
+        duplicates: list = []
+        for raw in symbols:
+            s = raw.strip()
+            if not cls.is_valid_code(s):
+                invalid.append(raw)
+                continue
+            # 标准化为 ts_code
+            m = cls._CODE_RE.match(s)
+            digits = m.group(1)
+            suffix = (m.group(2) or ("SH" if digits.startswith("6") else "SZ")).upper()
+            ts = f"{digits}.{suffix}"
+            if ts in seen:
+                duplicates.append(ts)
+            else:
+                seen.add(ts)
+                valid.append(ts)
+        return {"valid": valid, "invalid": invalid, "duplicates": duplicates}
+
     def build_custom_pool(self, symbols: List[str]) -> pd.DataFrame:
-        """根据自定义 symbol 列表构建 DataFrame，接受带或不带交易所后缀的代码"""
-        rows = []
-        for s in symbols:
-            ts = s if ("." in s) else (f"{s}.SH" if str(s).startswith("6") else f"{s}.SZ")
-            rows.append({"symbol": s, "ts_code": ts})
+        """根据自定义 symbol 列表构建 DataFrame。
+
+        自动剔除非法代码并去重，返回含 ts_code / symbol 列的 DataFrame。
+        非法代码会以 WARNING 级别记录日志，但不会抛出异常。
+        """
+        result = self.validate_codes(symbols)
+        if result["invalid"]:
+            logger.warning(f"自定义股票池包含非法代码，已忽略: {result['invalid']}")
+        if result["duplicates"]:
+            logger.warning(f"自定义股票池存在重复代码，已去重: {result['duplicates']}")
+        rows = [{"symbol": ts.split(".")[0], "ts_code": ts} for ts in result["valid"]]
         return pd.DataFrame(rows)

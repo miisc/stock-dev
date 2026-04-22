@@ -23,11 +23,12 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as Navigatio
 from matplotlib.figure import Figure
 
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
-    QLabel, QPushButton, QSizePolicy, QFrame
+    QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QScrollArea,
+    QLabel, QPushButton, QSizePolicy, QFrame, QTableWidget, QTableWidgetItem, QHeaderView,
+    QSplitter, QComboBox
 )
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QColor
 
 if TYPE_CHECKING:
     from ..backtesting.result import BacktestResult
@@ -90,11 +91,47 @@ class _BaseFigureWidget(QWidget):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 图1：权益曲线 + 回撤
+# 图1：权益曲线 + 回撤 + 持仓详情表
 # ─────────────────────────────────────────────────────────────────────────────
 
-class EquityCurveWidget(_BaseFigureWidget):
-    """权益曲线（上）+ 最大回撤（下）"""
+class EquityCurveWidget(QWidget):
+    """权益曲线（上）+ 回撤（中）+ 持仓详情表（下）"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+        
+        # 图表部分
+        self.figure = Figure(constrained_layout=True)
+        self.canvas = FigureCanvas(self.figure)
+        self.canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        
+        toolbar = NavigationToolbar(self.canvas, self)
+        toolbar.setStyleSheet("background: #1e2130; color: #c8ccd8;")
+        
+        chart_layout = QVBoxLayout()
+        chart_layout.setContentsMargins(0, 0, 0, 0)
+        chart_layout.addWidget(toolbar)
+        chart_layout.addWidget(self.canvas)
+        
+        layout.addLayout(chart_layout, stretch=2)
+        
+        # 持仓表格部分
+        table_label = QLabel("持仓详情")
+        table_label.setStyleSheet("color: #c8ccd8; font-weight: bold; padding: 4px;")
+        layout.addWidget(table_label)
+        
+        self.position_table = QTableWidget(0, 6)
+        self.position_table.setHorizontalHeaderLabels(["日期", "代码", "数量", "成本价", "当前价", "浮动盈亏"])
+        self.position_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.position_table.setMaximumHeight(150)
+        self.position_table.setStyleSheet(
+            "QTableWidget { background: #262d3f; color: #c8ccd8; gridline-color: #3a4060; }"
+            "QHeaderView::section { background: #1e2130; color: #c8ccd8; padding: 4px; border: 1px solid #3a4060; }"
+        )
+        layout.addWidget(self.position_table, stretch=1)
 
     def plot(self, result: "BacktestResult") -> None:
         self.figure.clear()
@@ -105,7 +142,7 @@ class EquityCurveWidget(_BaseFigureWidget):
             ax.text(0.5, 0.5, "暂无权益曲线数据", ha="center", va="center",
                     fontsize=14, color="#888")
             _apply_dark_style(self.figure, [ax])
-            self._redraw()
+            self.canvas.draw()
             return
 
         # 确保索引是日期类型
@@ -164,7 +201,98 @@ class EquityCurveWidget(_BaseFigureWidget):
         self.figure.autofmt_xdate(rotation=30)
 
         _apply_dark_style(self.figure, [ax_eq, ax_dd])
-        self._redraw()
+        self.canvas.draw()
+        
+        # 填充持仓表格
+        self._populate_position_table(result)
+
+    def _populate_position_table(self, result: "BacktestResult") -> None:
+        """填充持仓详情表格"""
+        self.position_table.setRowCount(0)
+        
+        if not result.daily_portfolio:
+            return
+        
+        # 收集所有有持仓的日期和持仓信息
+        rows = []
+        for daily_record in result.daily_portfolio:
+            positions = daily_record.get('positions', [])
+            if not positions:
+                continue
+            
+            date = daily_record.get('date')
+            if date is None:
+                continue
+            
+            date_str = date.strftime('%Y-%m-%d') if hasattr(date, 'strftime') else str(date).split(' ')[0]
+            
+            for pos in positions:
+                symbol = pos.get('symbol', '')
+                volume = pos.get('volume', 0)
+                avg_price = pos.get('avg_price', 0)
+                market_value = pos.get('market_value', 0)
+                
+                if volume == 0:
+                    continue
+                
+                # 计算当前价 = market_value / volume
+                current_price = market_value / abs(volume) if volume != 0 else 0
+                
+                # 浮动盈亏 = (当前价 - 成本价) × 数量
+                floating_pnl = (current_price - avg_price) * volume
+                
+                rows.append({
+                    'date': date_str,
+                    'symbol': symbol,
+                    'volume': volume,
+                    'avg_price': avg_price,
+                    'current_price': current_price,
+                    'floating_pnl': floating_pnl,
+                })
+        
+        # 显示表格
+        self.position_table.setRowCount(len(rows))
+        for row_idx, row_data in enumerate(rows):
+            # 日期
+            item_date = QTableWidgetItem(row_data['date'])
+            item_date.setTextAlignment(Qt.AlignCenter)
+            self.position_table.setItem(row_idx, 0, item_date)
+            
+            # 代码
+            item_symbol = QTableWidgetItem(row_data['symbol'])
+            item_symbol.setTextAlignment(Qt.AlignCenter)
+            self.position_table.setItem(row_idx, 1, item_symbol)
+            
+            # 数量
+            item_volume = QTableWidgetItem(str(int(row_data['volume'])))
+            item_volume.setTextAlignment(Qt.AlignCenter)
+            self.position_table.setItem(row_idx, 2, item_volume)
+            
+            # 成本价
+            item_cost = QTableWidgetItem(f"{row_data['avg_price']:.2f}")
+            item_cost.setTextAlignment(Qt.AlignCenter)
+            self.position_table.setItem(row_idx, 3, item_cost)
+            
+            # 当前价
+            item_current = QTableWidgetItem(f"{row_data['current_price']:.2f}")
+            item_current.setTextAlignment(Qt.AlignCenter)
+            self.position_table.setItem(row_idx, 4, item_current)
+            
+            # 浮动盈亏
+            pnl = row_data['floating_pnl']
+            pnl_text = f"{pnl:.2f}"
+            item_pnl = QTableWidgetItem(pnl_text)
+            item_pnl.setTextAlignment(Qt.AlignCenter)
+            if pnl > 0:
+                item_pnl.setForeground(QColor("#66bb6a"))  # 绿色
+            elif pnl < 0:
+                item_pnl.setForeground(QColor("#ef5350"))  # 红色
+            self.position_table.setItem(row_idx, 5, item_pnl)
+
+    def clear(self):
+        self.figure.clear()
+        self.canvas.draw()
+        self.position_table.setRowCount(0)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -241,59 +369,230 @@ class PriceSignalWidget(_BaseFigureWidget):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 图3：每笔交易收益分布
+# 图3：交易详情（逐笔盈亏图 + 明细表）
 # ─────────────────────────────────────────────────────────────────────────────
 
-class TradeDistributionWidget(_BaseFigureWidget):
-    """每笔交易盈亏直方图 + 关键统计线"""
+class TradeDetailWidget(QWidget):
+    """交易详情：左侧逐笔盈亏图，右侧交易明细表"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._all_rows = []
+        self._filtered_rows = []
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        header_row = QHBoxLayout()
+        self.title_label = QLabel("交易详情")
+        self.title_label.setStyleSheet("color: #c8ccd8; font-weight: bold; padding: 4px;")
+
+        self.stats_label = QLabel("")
+        self.stats_label.setStyleSheet("color: #9aa3b2; padding: 4px;")
+
+        self.filter_combo = QComboBox()
+        self.filter_combo.addItems(["全部", "仅盈利", "仅亏损"])
+        self.filter_combo.setStyleSheet(
+            "QComboBox { background: #262d3f; color: #c8ccd8; border: 1px solid #3a4060; padding: 2px 8px; }"
+            "QComboBox QAbstractItemView { background: #262d3f; color: #c8ccd8; }"
+        )
+        self.filter_combo.currentIndexChanged.connect(self._apply_filter)
+
+        header_row.addWidget(self.title_label)
+        header_row.addStretch()
+        header_row.addWidget(self.stats_label)
+        header_row.addWidget(self.filter_combo)
+        layout.addLayout(header_row)
+
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.setHandleWidth(6)
+        splitter.setStyleSheet("QSplitter::handle { background: #3a4060; }")
+
+        left = QWidget()
+        left_layout = QVBoxLayout(left)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.figure = Figure(constrained_layout=True)
+        self.canvas = FigureCanvas(self.figure)
+        self.canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        toolbar = NavigationToolbar(self.canvas, self)
+        toolbar.setStyleSheet("background: #1e2130; color: #c8ccd8;")
+        left_layout.addWidget(toolbar)
+        left_layout.addWidget(self.canvas)
+
+        right = QWidget()
+        right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.table = QTableWidget(0, 6)
+        self.table.setHorizontalHeaderLabels(["交易日期", "买卖方向", "数量", "价格", "盈亏(元)", "收益率(%)"])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.setStyleSheet(
+            "QTableWidget { background: #262d3f; color: #c8ccd8; gridline-color: #3a4060; }"
+            "QHeaderView::section { background: #1e2130; color: #c8ccd8; padding: 4px; border: 1px solid #3a4060; }"
+        )
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SingleSelection)
+        self.table.itemSelectionChanged.connect(self._on_table_selection_changed)
+        right_layout.addWidget(self.table)
+
+        splitter.addWidget(left)
+        splitter.addWidget(right)
+        splitter.setSizes([560, 640])
+        layout.addWidget(splitter)
+
+        self.canvas.mpl_connect("button_press_event", self._on_chart_click)
 
     def plot(self, result: "BacktestResult") -> None:
+        """填充交易详情图表和表格"""
+        trades = result.trades or []
+        rows = []
+
+        for trade in trades:
+            dt = trade.get("datetime") or trade.get("timestamp")
+            dt_ts = pd.to_datetime(dt, errors="coerce")
+            date_str = dt_ts.strftime("%Y-%m-%d") if pd.notna(dt_ts) else ""
+
+            direction = trade.get("direction", "")
+            direction_str = "B" if "BUY" in str(direction).upper() else "S"
+
+            volume = trade.get("volume", trade.get("quantity", 0)) or 0
+            price = float(trade.get("price", 0) or 0)
+            pnl = float(trade.get("pnl", 0) or 0)
+            ret = float(trade.get("return_pct", 0) or 0)
+
+            rows.append({
+                "dt": dt_ts,
+                "date": date_str,
+                "direction": direction_str,
+                "volume": int(volume),
+                "price": price,
+                "pnl": pnl,
+                "ret": ret,
+            })
+
+        rows.sort(key=lambda x: x["dt"] if pd.notna(x["dt"]) else pd.Timestamp.min)
+        self._all_rows = rows
+        self._apply_filter()
+
+    def clear(self):
+        self._all_rows = []
+        self._filtered_rows = []
+        self.title_label.setText("交易详情")
+        self.stats_label.setText("")
+        self.table.setRowCount(0)
+        self.figure.clear()
+        self.canvas.draw()
+
+    def _apply_filter(self):
+        mode = self.filter_combo.currentText()
+        if mode == "仅盈利":
+            rows = [r for r in self._all_rows if r["pnl"] > 0]
+        elif mode == "仅亏损":
+            rows = [r for r in self._all_rows if r["pnl"] < 0]
+        else:
+            rows = list(self._all_rows)
+
+        self._filtered_rows = rows
+        self._populate_table(rows)
+        self._render_pnl_chart(rows)
+        self._update_summary(rows)
+
+    def _populate_table(self, rows):
+        self.table.setRowCount(len(rows))
+        for row_idx, row in enumerate(rows):
+            item_date = QTableWidgetItem(row["date"])
+            item_date.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(row_idx, 0, item_date)
+
+            item_dir = QTableWidgetItem(row["direction"])
+            item_dir.setTextAlignment(Qt.AlignCenter)
+            item_dir.setForeground(QColor("#66bb6a") if row["direction"] == "B" else QColor("#ef5350"))
+            self.table.setItem(row_idx, 1, item_dir)
+
+            item_qty = QTableWidgetItem(str(row["volume"]))
+            item_qty.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(row_idx, 2, item_qty)
+
+            item_price = QTableWidgetItem(f"{row['price']:.2f}")
+            item_price.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(row_idx, 3, item_price)
+
+            item_pnl = QTableWidgetItem(f"{row['pnl']:.2f}")
+            item_pnl.setTextAlignment(Qt.AlignCenter)
+            if row["pnl"] > 0:
+                item_pnl.setForeground(QColor("#66bb6a"))
+            elif row["pnl"] < 0:
+                item_pnl.setForeground(QColor("#ef5350"))
+            self.table.setItem(row_idx, 4, item_pnl)
+
+            item_ret = QTableWidgetItem(f"{row['ret']:.2f}")
+            item_ret.setTextAlignment(Qt.AlignCenter)
+            if row["ret"] > 0:
+                item_ret.setForeground(QColor("#66bb6a"))
+            elif row["ret"] < 0:
+                item_ret.setForeground(QColor("#ef5350"))
+            self.table.setItem(row_idx, 5, item_ret)
+
+    def _render_pnl_chart(self, rows, selected_idx=None):
         self.figure.clear()
         ax = self.figure.add_subplot(111)
 
-        trades = result.trades or []
-        pnl_list = [t.get("pnl", t.get("profit", 0)) for t in trades
-                    if t.get("pnl", t.get("profit")) is not None]
-
-        if not pnl_list:
-            ax.text(0.5, 0.5, "暂无交易记录", ha="center", va="center",
-                    fontsize=14, color="#888")
+        if not rows:
+            ax.text(0.5, 0.5, "暂无交易记录", ha="center", va="center", fontsize=14, color="#888")
             _apply_dark_style(self.figure, [ax])
-            self._redraw()
+            self.canvas.draw()
+            self.title_label.setText("交易详情")
             return
 
-        pnl_arr = np.array(pnl_list, dtype=float)
-        bins = min(30, max(10, len(pnl_arr) // 3))
+        pnl = np.array([r["pnl"] for r in rows], dtype=float)
+        x = np.arange(len(rows))
+        colors = np.where(pnl >= 0, "#66bb6a", "#ef5350")
 
-        colors = ["#66bb6a" if v >= 0 else "#ef5350" for v in pnl_arr]
-        n, bin_edges, patches = ax.hist(pnl_arr, bins=bins, edgecolor="#333")
-        for patch, c in zip(patches, [colors[int(len(colors) * (i / bins))]
-                                       for i in range(len(patches))]):
-            patch.set_facecolor(c)
-            patch.set_alpha(0.75)
+        ax.bar(x, pnl, color=colors, alpha=0.85)
+        ax.axhline(0, color="#9aa3b2", linewidth=0.9, linestyle="--")
 
-        # 均值线
-        mean_val = np.mean(pnl_arr)
-        ax.axvline(mean_val, color="#ffd54f", linewidth=1.5,
-                   linestyle="--", label=f"均值: {mean_val:.2f}")
-        ax.axvline(0, color="#aaa", linewidth=1.0, linestyle="-")
+        if selected_idx is not None and 0 <= selected_idx < len(rows):
+            ax.scatter([selected_idx], [pnl[selected_idx]], s=140, facecolors="none",
+                       edgecolors="#ffd54f", linewidths=2, zorder=5)
 
-        ax.set_xlabel("每笔盈亏 (元)")
-        ax.set_ylabel("交易次数")
-        ax.set_title(f"交易盈亏分布  (共 {len(pnl_arr)} 笔)")
-        ax.legend(fontsize=8, framealpha=0.3)
-
-        # 统计注释
-        win_count = np.sum(pnl_arr > 0)
-        lose_count = np.sum(pnl_arr < 0)
-        win_rate = win_count / len(pnl_arr) * 100
-        note = (f"盈利: {int(win_count)}笔  亏损: {int(lose_count)}笔  "
-                f"胜率: {win_rate:.1f}%")
-        ax.text(0.98, 0.97, note, transform=ax.transAxes, fontsize=8,
-                color="#aaa", ha="right", va="top")
+        step = max(1, len(rows) // 10)
+        tick_locs = x[::step]
+        tick_lbls = [rows[i]["date"][5:] if rows[i]["date"] else str(i + 1) for i in tick_locs]
+        ax.set_xticks(tick_locs)
+        ax.set_xticklabels(tick_lbls, rotation=20, fontsize=8)
+        ax.set_xlabel("交易日期")
+        ax.set_ylabel("盈亏 (元)")
+        ax.set_title("逐笔交易盈亏")
 
         _apply_dark_style(self.figure, [ax])
-        self._redraw()
+        self.canvas.draw()
+
+    def _update_summary(self, rows):
+        total = len(rows)
+        win = sum(1 for r in rows if r["pnl"] > 0)
+        lose = sum(1 for r in rows if r["pnl"] < 0)
+        total_pnl = sum(r["pnl"] for r in rows)
+        win_rate = (win / total * 100) if total else 0.0
+
+        self.title_label.setText(f"交易详情 (共 {total} 笔)")
+        self.stats_label.setText(
+            f"盈利: {win}  亏损: {lose}  胜率: {win_rate:.1f}%  总盈亏: {total_pnl:.2f}"
+        )
+
+    def _on_table_selection_changed(self):
+        rows = self.table.selectionModel().selectedRows()
+        if not rows:
+            self._render_pnl_chart(self._filtered_rows)
+            return
+        self._render_pnl_chart(self._filtered_rows, selected_idx=rows[0].row())
+
+    def _on_chart_click(self, event):
+        if event.inaxes is None or not self._filtered_rows or event.xdata is None:
+            return
+        idx = int(round(event.xdata))
+        if 0 <= idx < len(self._filtered_rows):
+            self.table.selectRow(idx)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -375,9 +674,10 @@ class CandlestickWidget(_BaseFigureWidget):
         dt_to_x = {pd.Timestamp(t): xi for xi, t in enumerate(idx)}
         buy_xs, buy_ps, sell_xs, sell_ps = [], [], [], []
         for sig in signals:
-            if not hasattr(sig, "timestamp") or not hasattr(sig, "price"):
+            sig_time = getattr(sig, "timestamp", None) or getattr(sig, "datetime", None)
+            if sig_time is None or not hasattr(sig, "price"):
                 continue
-            t = pd.Timestamp(sig.timestamp)
+            t = pd.Timestamp(sig_time)
             xi = dt_to_x.get(t)
             if xi is None:
                 # 找最近
@@ -436,7 +736,7 @@ class CandlestickWidget(_BaseFigureWidget):
 class BacktestChartWidget(QWidget):
     """
     回测结果可视化主控件。
-    嵌入四个图表标签页：K线图、权益曲线、交易信号、收益分布。
+    嵌入三个图表标签页：K线图、权益曲线、交易详情。
     用法：
         widget.update_charts(result, price_df)
     """
@@ -471,16 +771,14 @@ class BacktestChartWidget(QWidget):
         """)
         layout.addWidget(self.tab_widget)
 
-        # 四个子图控件
+        # 三个子图控件（去掉交易信号页）
         self.candle_widget  = CandlestickWidget()
         self.equity_widget  = EquityCurveWidget()
-        self.signal_widget  = PriceSignalWidget()
-        self.dist_widget    = TradeDistributionWidget()
+        self.trade_detail_widget = TradeDetailWidget()
 
         self.tab_widget.addTab(self.candle_widget,  "K线图")
         self.tab_widget.addTab(self.equity_widget,  "权益曲线")
-        self.tab_widget.addTab(self.signal_widget,  "交易信号")
-        self.tab_widget.addTab(self.dist_widget,    "收益分布")
+        self.tab_widget.addTab(self.trade_detail_widget, "交易详情")
 
         self._result = None
         self._price_df = None
@@ -489,14 +787,13 @@ class BacktestChartWidget(QWidget):
 
     def update_charts(self, result: "BacktestResult",
                       price_df: Optional[pd.DataFrame] = None) -> None:
-        """回测完成后调用，刷新四张图"""
+        """回测完成后调用，刷新三张图"""
         self._result = result
         self._price_df = price_df
 
         self.candle_widget.plot(result, price_df)
         self.equity_widget.plot(result)
-        self.signal_widget.plot(result, price_df)
-        self.dist_widget.plot(result)
+        self.trade_detail_widget.plot(result)
 
         self.export_btn.setEnabled(True)
         # 自动跳到 K线图页
@@ -504,25 +801,41 @@ class BacktestChartWidget(QWidget):
 
     def clear_charts(self) -> None:
         """清空所有图表"""
-        for w in (self.candle_widget, self.equity_widget, self.signal_widget, self.dist_widget):
+        for w in (self.candle_widget, self.equity_widget, self.trade_detail_widget):
             w.clear()
         self.export_btn.setEnabled(False)
 
     # ------------------------------------------------------------------ private
 
     def _export_charts(self) -> None:
-        """（可扩展）将当前图表保存为 PNG"""
+        """导出当前页面的图表为 PNG"""
         if self._result is None:
             return
         from PyQt5.QtWidgets import QFileDialog
+        
+        current_idx = self.tab_widget.currentIndex()
+        if current_idx == 2:  # 交易详情页 (表格)
+            # 表格无法用 matplotlib 导出，提示用户
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.information(self, "提示", "交易详情为表格，请使用截图或其他工具保存")
+            return
+        
+        # 获取当前页面的 Figure
+        if current_idx == 0:
+            current_widget = self.candle_widget
+            chart_name = "K线图"
+        elif current_idx == 1:
+            current_widget = self.equity_widget
+            chart_name = "权益曲线"
+        else:
+            return
+        
         path, _ = QFileDialog.getSaveFileName(
-            self, "保存图表", f"backtest_{self._result.strategy_name}.png",
+            self, "保存图表", f"backtest_{self._result.strategy_name}_{chart_name}.png",
             "PNG 图片 (*.png)"
         )
         if path:
-            # 将三张图合并保存
-            fig_combined, axes = plt.subplots(3, 1, figsize=(14, 16))
-            plt.tight_layout(pad=3)
-            fig_combined.savefig(path, dpi=150, bbox_inches="tight",
-                                 facecolor="#1e2130")
-            plt.close(fig_combined)
+            current_widget.figure.savefig(path, dpi=150, bbox_inches="tight",
+                                          facecolor="#1e2130")
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.information(self, "导出成功", f"图表已保存到:\\n{path}")

@@ -10,6 +10,8 @@ BatchRunner 单元测试
 import sys
 import time
 import threading
+import json
+import sqlite3
 from pathlib import Path
 from datetime import datetime
 from unittest.mock import patch, MagicMock
@@ -206,6 +208,100 @@ def test_persist_results_false_skips_db():
     print("✓ persist_results=False 时跳过数据库写入")
 
 
+def test_cancel_marks_remaining_status_as_cancelled():
+    """取消后未处理标的应标记为 cancelled，且已完成结果可见"""
+    codes = ['S1', 'S2', 'S3', 'S4']
+    runner = BatchRunner()
+    processed = []
+
+    def slow_run(strategy, syms):
+        code = syms[0]
+        processed.append(code)
+        if code == 'S2':
+            runner.cancel()
+        return _make_fake_result(code)
+
+    with patch('src.backtesting.batch_runner.BacktestEngine.run_backtest', side_effect=slow_run):
+        results = runner.run(codes, _factory, START, END, persist_results=False)
+
+    status = runner.get_last_run_status()
+    assert len(results) == 2, f"取消后应仅完成2只，实际 {len(results)}"
+    assert status['success'] == ['S1', 'S2']
+    assert set(status['cancelled']) == {'S3', 'S4'}
+    print(f"✓ 取消状态可见: success={status['success']} cancelled={status['cancelled']}")
+
+
+def test_resume_incomplete_then_failed_scope():
+    """续跑支持 incomplete 和 failed 范围"""
+    codes = ['A', 'B', 'C']
+    runner = BatchRunner()
+
+    state = {'phase': 'first'}
+    calls = []
+
+    def side_effect(strategy, syms):
+        code = syms[0]
+        calls.append((state['phase'], code))
+
+        if state['phase'] == 'first':
+            if code == 'A':
+                runner.cancel()
+            return _make_fake_result(code)
+
+        if state['phase'] == 'resume_incomplete':
+            if code == 'B':
+                raise RuntimeError('B failed in resume_incomplete')
+            return _make_fake_result(code)
+
+        # phase == resume_failed
+        return _make_fake_result(code)
+
+    with patch('src.backtesting.batch_runner.BacktestEngine.run_backtest', side_effect=side_effect):
+        first_results = runner.run(codes, _factory, START, END, persist_results=False)
+        assert [r.symbols[0] for r in first_results] == ['A']
+
+        state['phase'] = 'resume_incomplete'
+        second_results = runner.resume(scope='incomplete', persist_results=False)
+        assert [r.symbols[0] for r in second_results] == ['C']
+
+        state['phase'] = 'resume_failed'
+        third_results = runner.resume(scope='failed', persist_results=False)
+        assert [r.symbols[0] for r in third_results] == ['B']
+
+    print("✓ resume 支持 incomplete/failed 范围")
+
+
+def test_persisted_config_json_contains_experiment_snapshot(tmp_path):
+    """持久化结果应包含实验快照最小字段"""
+    db_path = tmp_path / 'snapshot.db'
+    runner = BatchRunner(str(db_path))
+
+    def snapshot_factory():
+        return _DummyStrategy('dual_ma', 'DualMA', params={'short': 5, 'long': 20})
+
+    with patch('src.backtesting.batch_runner.BacktestEngine.run_backtest',
+               side_effect=lambda strategy, syms: _make_fake_result(syms[0])):
+        runner.run(['000001.SZ'], snapshot_factory, START, END, persist_results=True)
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute(
+            "SELECT config_json FROM backtest_results ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row is not None and row[0], "应存在持久化 config_json"
+    cfg = json.loads(row[0])
+    snap = cfg.get('experiment_snapshot')
+    assert isinstance(snap, dict), "应包含 experiment_snapshot"
+    assert snap.get('ts_codes_snapshot') == ['000001.SZ']
+    assert snap.get('start_date') == START.strftime('%Y%m%d')
+    assert snap.get('end_date') == END.strftime('%Y%m%d')
+    assert snap.get('strategy_snapshot', {}).get('strategy_params') == {'short': 5, 'long': 20}
+    print("✓ 持久化快照字段完整")
+
+
 if __name__ == '__main__':
     tests = [
         test_run_returns_results_for_all_stocks,
@@ -216,6 +312,9 @@ if __name__ == '__main__':
         test_cancel_stops_run,
         test_empty_ts_codes,
         test_persist_results_false_skips_db,
+        test_cancel_marks_remaining_status_as_cancelled,
+        test_resume_incomplete_then_failed_scope,
+        test_persisted_config_json_contains_experiment_snapshot,
     ]
     passed = failed = 0
     for t in tests:

@@ -72,6 +72,7 @@ class BacktestResult:
     trades: List[Dict[str, Any]] = field(default_factory=list)
     daily_portfolio: List[Dict[str, Any]] = field(default_factory=list)
     benchmark: Optional[str] = None
+    quality_hints: List[str] = field(default_factory=list)
     
     # 计算属性
     def __post_init__(self):
@@ -260,7 +261,8 @@ class BacktestResult:
             'total_days': self.total_days,
             'metrics': self.metrics.to_dict(),
             'total_trades': len(self.trades),
-            'total_signals': len(self.signals)
+            'total_signals': len(self.signals),
+            'quality_hints': self.quality_hints,
         }
     
     def print_summary(self):
@@ -289,5 +291,10 @@ class BacktestResult:
         print(f"  胜率: {self.metrics.win_rate:.2f}%")
         print(f"  盈亏比: {self.metrics.profit_loss_ratio:.2f}")
         print(f"  平均每笔收益率: {self.metrics.avg_trade_return:.2f}%")
+
+        if self.quality_hints:
+            print(f"\n质量提示:")
+            for hint in self.quality_hints:
+                print(f"  - {hint}")
         
         print("="*60)

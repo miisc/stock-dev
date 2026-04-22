@@ -1,249 +1,176 @@
-# 项目开发 TODO 列表
+# TODO（基于代码审计）
 
-## 股票池三层模型（设计原则）
+更新时间：2026-04-21
+基准文档：[doc/tasks.md](doc/tasks.md)
 
-```
-层次1：下载范围（一次性/定期更新）
-└── 决定本地数据库里有哪些股票的历史数据
-    例：下载"沪深300"，本地就有300只的数据
+## 状态与优先级口径
 
-层次2：回测范围（每次回测时选择）
-└── 从本地已有数据中圈定范围
-    例：选"上证50"，只对本地已有的这50只跑回测
+1. 状态：todo / doing / blocked / partial / done。
+2. 优先级：P0（主链阻塞）/ P1（里程碑关键）/ P2（优化项）。
+3. 本清单按代码与测试现状评估，不按历史勾选继承。
 
-层次3：个股筛选（可选，进一步缩小）
-└── 在层次2基础上手动勾选/排除个别股票
-    例：从沪深300中手动勾选金融板块的若干只
-```
+## 总览
 
-> **关键原则**：下载与回测解耦。数据下载一次保存本地，之后可反复用不同范围回测，无需重新联网。回测时只能选本地已有数据的股票。
+1. 总任务：12
+2. 已完成：8（T2, T3, T4, T6, T7, T10, T11, T12）
+3. 部分完成：4（T1, T5, T8, T9）
+4. 未完成：0
+5. P0待完成：0
 
----
+## 任务清单（按里程碑）
 
-> ## 一期目标：MVP Demo
-> 一期只实现核心流程的最小可用版本：**下载数据 → 选股票池 → 单策略批量回测 → 汇总结果**。
-> **一期必须包含**：前视偏差控制、前复权数据、基础交易成本（否则回测结果不可信）。
-> 基准对比、参数优化、组合回测等进阶功能列入二期。
+### M1 数据管理
 
----
+#### T1 股票池与输入规则
+- 状态：partial
+- 优先级：P1
+- 代码证据：
+  - 预置池与缓存能力：[src/data/universe.py](src/data/universe.py#L28)
+  - 自定义池构建能力：[src/data/stock_pool.py](src/data/stock_pool.py#L110)
+- 缺口：非法代码处理与输入规范尚未统一。
+- 下一步：补统一输入校验规则、异常分级与样例判定表。
 
-## 第一阶段：数据层补全
+#### T2 下载与增量更新规则
+- 状态：done
+- 优先级：P1
+- 代码证据：
+  - 下载进度/失败重试/取消：[src/data/batch_downloader.py](src/data/batch_downloader.py#L120)
+  - 增量更新逻辑：[src/data/data_fetcher.py](src/data/data_fetcher.py#L149)
+- 验证结论：重复区间可通过已有数据与 meta 判定避免重复下载。
 
-### 1. 股票池管理器（src/data/universe.py）
-- [x] 获取沪深300成分股列表（akshare）
-- [x] 获取上证50成分股列表
-- [x] 获取创业板50成分股列表
-- [x] 获取中证500成分股列表
-- [x] 获取全部A股列表
-- [x] 本地缓存成分股列表（避免频繁请求）—— `data/universe_cache.json`
-- [x] 缓存过期机制（建议每日刷新）—— `_is_cache_stale()` 每日检查
+#### T3 数据质量与放行策略
+- 状态：done
+- 优先级：P0
+- 代码证据：
+  - 数据清洗与告警基础：[src/data/data_processor.py](src/data/data_processor.py#L127)
+  - 质量报告落盘与阈值加载：[src/data/data_fetcher.py](src/data/data_fetcher.py#L41)
+  - 回测前质量门禁与warning放行开关：[src/backtesting/backtest_engine.py](src/backtesting/backtest_engine.py#L264)
+- 缺口：
+  - 已关闭。
+- 验证结论：
+  - `pytest tests/test_data_quality_gate.py -q` -> 3 passed
+  - `pytest tests/test_backtest_engine.py tests/test_data_processor.py -q` -> 3 passed
+- 下一步：保持回归即可；P0 主链转入 T10。
 
-### 2. 批量下载管理器（src/data/batch_downloader.py）
-- [x] 接收股票列表，循环调用下载
-- [x] 进度回调接口（progress_callback(done, total, ts_code)）
-- [x] **并发数已改为 <=3（默认值）；`_rate_limited_sleep()` 确保请求间隔 >= 500ms**
-- [x] 失败重试机制（最多3次，retry_delay=1.0s）
-- [x] 失败股票列表记录（failures 列表）
-- [x] 支持取消操作（`_cancel_event` threading.Event）
-- [x] **已重构为 Queue + 单一写入线程（`_writer_worker`），下载线程不直接写 SQLite**
+### M2 回测执行
 
-### 3. 增量更新逻辑（src/data/fetcher.py 修改）
-- [x] **前复权数据：akshare_source.py 已固定使用 `adjust="qfq"`**
-- [x] 检查本地最新日期 —— `_get_meta_last_date()` + `market_meta.json`
-- [x] 只下载缺失的日期区间 —— `fetch_incremental()`
-- [x] 合并新旧数据写入 storage
+#### T4 策略参数字典与校验
+- 状态：done
+- 优先级：P1
+- 代码证据：
+  - 参数定义与校验：[src/trading/strategy_config.py](src/trading/strategy_config.py#L24)
+  - GUI 参数校验反馈：[src/gui/strategy_panel.py](src/gui/strategy_panel.py#L252)
+- 验证结论：参数类型、范围、必填规则已可执行。
 
-### 3b. 数据库索引优化（src/common/database.py）
-- [x] **复合索引已建立：`idx_stock_daily_code_date ON stock_daily (ts_code, trade_date)`**
-- [x] 回测结果持久化表已建立：`backtest_results`（含策略名/起止日/各项指标/config_json）
+#### T5 批量回测任务状态机
+- 状态：partial
+- 优先级：P1
+- 代码证据：
+  - 批量回测进度与失败不中断：[src/backtesting/batch_runner.py](src/backtesting/batch_runner.py#L47)
+- 缺口：缺少统一状态机定义与结构化落库字段。
+- 下一步：补状态模型（排队/运行/部分成功/取消/完成）并统一对外口径。
 
----
+#### T6 取消与续跑规则
+- 状态：done
+- 优先级：P0
+- 代码证据：
+  - 取消能力与状态可见性：[src/backtesting/batch_runner.py](src/backtesting/batch_runner.py)
+  - 续跑范围（incomplete/failed/all）：[src/backtesting/batch_runner.py](src/backtesting/batch_runner.py)
+  - GUI 取消入口：[src/gui/backtest_panel.py](src/gui/backtest_panel.py#L528)
+- 缺口：
+  - 已关闭。
+- 验证结论：
+  - `pytest tests/test_batch_runner.py -q` -> 10 passed
+  - `pytest tests/test_backtest_engine.py -q` -> 1 passed
+- 下一步：进入 T10（实验快照最小字段），推进 P0 主链。
 
-## 第二阶段：回测层补全
+### M3 结果分析
 
-### 4. 回测引擎正确性修复（src/backtesting/backtest_engine.py）
+#### T7 指标字段标准化
+- 状态：done
+- 优先级：P1
+- 代码证据：
+  - 聚合字段清单：[src/analysis/aggregator.py](src/analysis/aggregator.py#L20)
+  - 面板列映射：[src/gui/result_panel.py](src/gui/result_panel.py#L28)
+- 验证结论：汇总字段与展示字段已基本一致。
 
-> ✅ 全部修复完成
+#### T8 筛选展示规则
+- 状态：partial
+- 优先级：P1
+- 代码证据：
+  - 排序能力：[src/gui/result_panel.py](src/gui/result_panel.py#L133)
+  - Top/Bottom 能力：[src/analysis/aggregator.py](src/analysis/aggregator.py#L90)
+- 缺口：多条件筛选行为与分布视图入口未固化。
+- 下一步：补筛选规则文档与最小分布视图闭环。
 
-- [x] **前视偏差控制：信号写入 `pending_orders`，次日开盘价执行（`_collect_signals` + `_execute_pending_orders`）**
-- [x] **基础交易成本（CostModel + ExecutionExecutor）**
-  - 买入佣金：0.03%（commission_rate=0.0003）✅
-  - 卖出佣金：0.03% + 印花税 0.1%（stamp_duty_rate=0.001）✅
-  - 滑点：0.1%（slippage_rate=0.001）
-- [x] **正确的指标计算（result.py）**
-  - 年化收益率：`(1 + total_ret) ** (252 / trading_days) - 1` ✅
-  - 最大回撤：从 daily_portfolio total_value 净值曲线计算 ✅
-  - 夏普比率：使用无风险利率 2%（risk_free_rate=0.02）✅
-- [ ] UI 结果页面注明：「数据基于前复权，含幸存者偏差，仅供参考」（GUI 阶段实现）
+#### T9 CSV 导出规范
+- 状态：partial
+- 优先级：P1
+- 代码证据：
+  - 汇总 CSV 导出：[src/analysis/aggregator.py](src/analysis/aggregator.py#L127)
+  - GUI 导出入口：[src/gui/result_panel.py](src/gui/result_panel.py#L231)
+- 缺口：单标的交易记录导出路径、字段字典与精度规范未完整。
+- 下一步：补齐交易记录 CSV 导出与字段规范说明。
 
-### 5. 批量回测调度器（src/backtesting/batch_runner.py）
-> ✅ 已完成
-- [x] 接收股票列表 + 策略类 + 参数 + 时间范围
-- [x] 循环调用 BacktestEngine，每只股票独立回测
-- [x] 进度回调接口（on_progress(current, total, ts_code)）
-- [x] 单股票失败不中断整体流程，记录失败原因
-- [x] 汇总所有股票的 BacktestResult 列表
-- [x] 支持取消操作（`_cancel_event`）
-- [x] 回测完成后将结果持久化到 backtest_results 表
+### M4 实验管理与复现
 
-### 6. 结果聚合（src/analysis/aggregator.py）
-> ✅ 已完成
-- [x] 汇总多股票回测结果为 DataFrame（ResultAggregator.build_summary()）
-- [x] 计算整体胜率（overall_win_rate()）
-- [x] Top N / Bottom N 排名（按夏普/收益率等任意列）
-- [x] 导出汇总结果到 CSV（to_csv()）
-- [x] 统计描述（describe()）
+#### T10 实验快照最小字段
+- 状态：done
+- 优先级：P0
+- 代码证据：
+  - 回测结果表与配置字段：[src/common/database.py](src/common/database.py#L112)
+  - 批量回测写入 experiment_snapshot：[src/backtesting/batch_runner.py](src/backtesting/batch_runner.py)
+  - 快照持久化测试：[tests/test_batch_runner.py](tests/test_batch_runner.py)
+- 缺口：
+  - 已关闭。
+- 验证结论：
+  - `pytest tests/test_batch_runner.py -q` -> 11 passed
+  - `pytest tests/test_data_quality_gate.py tests/test_backtest_engine.py -q` -> 4 passed
+- 下一步：进入 T11（历史检索与双实验对比）。
 
----
+#### T11 历史检索与双实验对比
+- 状态：done
+- 优先级：P0
+- 代码证据：
+  - 历史检索接口：[src/common/database.py](src/common/database.py)
+  - 双实验对比接口：[src/common/database.py](src/common/database.py)
+  - 对比测试用例：[tests/test_experiment_compare.py](tests/test_experiment_compare.py)
+- 缺口：
+  - 已关闭。
+- 验证结论：
+  - `pytest tests/test_experiment_compare.py -q` -> 2 passed
+  - `pytest tests/test_batch_runner.py tests/test_data_query_comprehensive.py -q` -> 14 passed
+- 下一步：进入 T12（一致性阈值与最终验收）。
 
-## 第三阶段：GUI 层重构
+#### T12 一致性阈值与最终验收
+- 状态：done
+- 优先级：P0
+- 代码证据：
+  - 一致性判定模块：[src/analysis/repeatability.py](src/analysis/repeatability.py)
+  - analysis 对外导出：[src/analysis/__init__.py](src/analysis/__init__.py)
+  - 阈值与性能目标配置：[config/config.yaml](config/config.yaml)
+  - 测试覆盖：[tests/test_repeatability_checker.py](tests/test_repeatability_checker.py)
+- 缺口：
+  - 已关闭。
+- 验证结论：
+  - `pytest tests/test_repeatability_checker.py -q` -> 2 passed
+  - `pytest tests/test_experiment_compare.py tests/test_metrics.py -q` -> 16 passed
+- 下一步：P0 主链已完成，转入 P1（T1/T5/T8/T9）补齐。
 
-> ✅ 全部完成
+## 推荐执行顺序（单人串行）
 
-> **线程模型**：`Worker(QThread)` 通过 `Signal` 发送进度和结果，主线程只负责更新 UI。
+1. P0 主链：已完成。
+2. P1 补齐：T1 -> T5 -> T8 -> T9。
+3. done 任务仅做回归，不重复返工：T2、T3、T4、T6、T7、T10、T11、T12。
 
-### 7. 数据管理面板 — 层次1：下载范围（src/gui/universe_panel.py）
+## 测试侧证据（用于 T12）
 
-- [x] 预置股票池选择（沪深300/上证50/创业板50/中证500/全部A股）
-- [x] 显示所选池的股票数量预估
-- [x] 显示本地已有数据的股票数量及最新日期（`_refresh_local_stats()`）
-- [x] 调用 universe.py 获取成分股列表
-- [x] 调用 batch_downloader.py 执行批量下载（`DownloadWorker(QThread)`）
-- [x] 下载进度条（已下载 x/总数，当前股票名称）
-- [x] 失败列表展示，支持单独重试（`_retry_failed()`）
-- [x] 取消按钮（通过 `DownloadWorker.cancel()` 取消标志位实现）
-- [x] `data_updated` 信号：下载成功后通知回测面板刷新股票列表
+1. 前视偏差测试：[tests/test_lookahead_bias.py](tests/test_lookahead_bias.py)
+2. 成本模型测试：[tests/test_cost_model.py](tests/test_cost_model.py)
+3. 指标计算测试：[tests/test_metrics.py](tests/test_metrics.py)
 
-### 8. 回测配置面板 — 层次2+3：回测范围与个股筛选（src/gui/backtest_panel.py）
+## 本次变更摘要
 
-- [x] 层次2 — 下拉列表显示本地已有的各股票池，选择后过滤本地已有股票
-- [x] 层次3 — 展示所选池的股票列表（QListWidget），支持全选/全不选/逐只勾选
-- [x] 层次3 — 支持按代码搜索过滤股票列表
-- [x] 最终选中股票数量实时显示
-- [x] 策略选择下拉框 + 策略参数配置表单（动态生成，来自 strategy_config_manager）
-- [x] 回测时间范围选择
-- [x] 交易成本参数配置（佣金/滑点，显示默认值，允许修改；印花税固定0.1%注明）
-- [x] 批量回测进度条（`BatchBacktestWorker(QThread)`）
-- [x] 取消按钮（JobWorker `cancel()` 方法）
-- [x] `backtest_finished` 信号：回测完成后广播 `List[BacktestResult]`
-
-### 9. 批量结果汇总视图（src/gui/result_panel.py）
-
-- [x] 汇总表格（代码/策略/收益率/年化/夏普/最大回撤/波动率/交易次数/胜率/盈亏比），支持列排序
-- [x] **结果页脚注明：「基于前复权数据，含幸存者偏差，交易成本按实际配置计算」**
-- [x] 整体胜率统计、平均夏普、平均年化（摘要行）
-- [x] 双击/点击「查看图表」按钮展示该股票详细图表弹窗（`_ChartDialog`）
-- [x] 导出 CSV 按钮（`ResultAggregator.to_csv()`）
-
-### 10. 主窗口标签页整合（src/gui/main_window.py）
-
-- [x] Tab1：数据管理（UniversePanel）
-- [x] Tab2：策略回测（BacktestPanel）
-- [x] Tab3：结果查看（ResultPanel）
-- [x] 标签页间数据传递：`data_updated` → `refresh_from_db()`；`backtest_finished` → `set_results()` + 自动切换 Tab3
-- [x] 状态栏：免责提示「基于前复权数据 | 含幸存者偏差 | 结果仅供参考」
-
----
-
-## 第四阶段：测试补全
-
-### 11. 单元测试
-- [ ] tests/test_universe.py - 股票池获取与缓存
-- [ ] tests/test_batch_downloader.py - 批量下载、进度、重试
-- [ ] tests/test_batch_runner.py - 批量回测调度
-- [ ] tests/test_aggregator.py - 结果聚合与导出
-- [ ] **tests/test_lookahead_bias.py - 验证回测无前视偏差（信号日 vs 成交日）**
-- [ ] **tests/test_cost_model.py - 验证手续费/印花税/滑点计算正确**
-- [ ] **tests/test_metrics.py - 验证年化收益/最大回撤/夏普比率计算正确**
-
----
-
-## 优先级顺序（一期 MVP）
-
-1. fetcher.py（前复权 + 增量更新）
-2. database.py（复合索引 + backtest_results 表）
-3. universe.py（股票池管理）
-4. batch_downloader.py（Queue写入 + 限速）
-5. backtest_engine.py（前视偏差修复 + 交易成本 + 指标修正）
-6. batch_runner.py（批量调度 + 持久化）
-7. aggregator.py（结果聚合）
-8. universe_panel.py（GUI + QThread）
-9. backtest_panel.py（GUI + QThread）
-10. result_panel.py（汇总视图 + 免责提示）
-11. main_window.py（标签页整合）
-12. 补全测试（含偏差/成本/指标专项测试）
-
----
-
-## 二期扩展（暂不实现）
-
-### A. 回测可信度
-
-#### A1. 基准对比（Benchmark）
-- [ ] 下载基准指数数据（沪深300/上证指数）并存入本地
-- [ ] 回测结果同时显示策略收益曲线 vs 基准收益曲线
-- [ ] 计算超额收益（Alpha）、相对基准的夏普比率
-- [ ] 汇总表格新增「跑赢基准」列
-
-#### A2. 交易成本进阶
-> 基础交易成本已列入一期。二期扩展：
-- [ ] 结果页「含成本 vs 不含成本」收益对比图
-- [ ] 支持自定义各股票/时期的差异化手续费率
-
-### B. 结果分析深度
-
-#### B1. 交易记录明细
-- [ ] 每笔交易记录：买入日期/价格/数量 → 卖出日期/价格/数量 → 单笔盈亏/持仓天数
-- [ ] 结果面板新增「交易明细」Tab，展示完整交易流水
-- [ ] 支持按盈亏排序、筛选
-
-#### B2. 收益时间分布
-- [ ] 按年收益率统计（2020: +25%, 2021: -8%, ...）
-- [ ] 按月收益率热力图
-- [ ] 最大连续亏损笔数统计
-- [ ] 盈亏分布直方图
-
-### C. 资金管理
-
-#### C1. 仓位控制
-- [ ] 回测参数新增仓位模式：固定金额 / 固定比例 / 全仓
-- [ ] 支持设置最大持仓比例上限
-
-#### C2. 多股票同时持仓（组合回测）
-- [ ] 同时持有多只股票时的资金分配逻辑
-- [ ] 组合整体收益曲线（非单股票独立）
-- [ ] 组合回撤与相关性分析
-
-### D. 防止过拟合
-
-#### D1. 参数敏感性测试
-- [ ] 对策略参数进行网格搜索（如短周期3-10，长周期15-30）
-- [ ] 热力图展示不同参数组合的收益率分布
-- [ ] 识别参数稳健区间 vs 碰巧好的参数
-
-#### D2. 滚动回测 / 时间分段验证
-- [ ] 训练集（如2015-2020）找最优参数
-- [ ] 测试集（如2020-2024）验证参数是否仍然有效
-- [ ] 避免策略过拟合历史数据
-
-### F. 架构与数据质量
-
-#### F1. 幸存者偏差修复
-- [ ] 下载历史指数成分股变动记录（需找历史成分股数据源）
-- [ ] 回测时按当时的成分股列表构建股票池，而非当前列表
-
-#### F2. 高级并发模型
-- [ ] 多线程下载 + Queue 写入升级为 asyncio 异步模型
-- [ ] 支持断点续传（程序中断后继续未完成的下载任务）
-- [ ] 下载任务持久化队列（重启后可恢复）
-
-### E. 用户体验
-
-#### E1. 回测配置保存与复现
-- [ ] 保存当前回测配置（策略+参数+股票池+时间范围）为命名配置
-- [ ] 配置列表页，支持一键加载历史配置重新回测
-
-#### E2. 回测历史记录
-- [ ] 每次回测自动保存结果到本地数据库
-- [ ] 历史回测列表，支持查看和对比不同次回测结果
-- [ ] 支持删除历史记录
+1. 新增优先级字段（P0/P1/P2）。
+2. 统一状态词典为 todo/doing/blocked/partial/done。
+3. 将 spec 关键风险映射到 P0 主链任务，明确执行顺序。

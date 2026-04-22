@@ -131,6 +131,8 @@ class ResultAggregator:
         ]
         df = self.summary
         available = [c for c in stat_cols if c in df.columns]
+        if df.empty or not available:
+            return pd.DataFrame(index=["mean", "std", "min", "50%", "max"])
         return df[available].describe().loc[["mean", "std", "min", "50%", "max"]]
 
     # ------------------------------------------------------------------
@@ -150,4 +152,44 @@ class ResultAggregator:
         output.parent.mkdir(parents=True, exist_ok=True)
         self.summary.to_csv(output, index=False, encoding="utf-8-sig")
         logger.info(f"回测汇总已导出: {output.resolve()}")
+        return str(output.resolve())
+
+    def trades_to_csv(self, path: str, ts_code: Optional[str] = None) -> str:
+        """将单标的或全部交易记录导出为 UTF-8 BOM CSV。
+
+        字段顺序固定为: ts_code, trade_date, direction, price, volume, amount, pnl
+
+        Args:
+            path: 输出文件路径
+            ts_code: 过滤特定标的，None 表示导出全部
+
+        Returns:
+            实际写入的绝对路径字符串
+        """
+        TRADE_COLUMNS = ["ts_code", "trade_date", "direction", "price", "volume", "amount", "pnl"]
+        rows = []
+        for r in self.results:
+            code = r.symbols[0] if r.symbols else ""
+            if ts_code is not None and code != ts_code:
+                continue
+            for t in r.trades:
+                row = {col: t.get(col, "") for col in TRADE_COLUMNS}
+                row["ts_code"] = code
+                # Normalize trade_date to string
+                td = row.get("trade_date", "")
+                if hasattr(td, "strftime"):
+                    row["trade_date"] = td.strftime("%Y-%m-%d")
+                # Round numeric fields to 4 decimal places
+                for col in ("price", "amount", "pnl"):
+                    try:
+                        row[col] = round(float(row[col]), 4)
+                    except (TypeError, ValueError):
+                        pass
+                rows.append(row)
+
+        df = pd.DataFrame(rows, columns=TRADE_COLUMNS)
+        output = Path(path)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        df.to_csv(output, index=False, encoding="utf-8-sig")
+        logger.info(f"交易记录已导出: {output.resolve()}")
         return str(output.resolve())

@@ -3,6 +3,7 @@
 """
 
 import sqlite3
+import json
 import pandas as pd
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Union
@@ -269,3 +270,151 @@ class DatabaseManager:
         
         with self.get_connection() as conn:
             return pd.read_sql_query(query, conn, params=params)
+
+    def search_backtest_results(
+        self,
+        strategy_name_keyword: Optional[str] = None,
+        created_start: Optional[str] = None,
+        created_end: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        """按策略名和创建时间检索历史回测结果。"""
+        query = """
+            SELECT id, strategy_name, symbol, start_date, end_date,
+                   total_return, annual_return, max_drawdown, sharpe_ratio,
+                   total_trades, win_rate, created_at
+            FROM backtest_results
+            WHERE 1=1
+        """
+        params: List[Any] = []
+
+        if strategy_name_keyword:
+            query += " AND strategy_name LIKE ?"
+            params.append(f"%{strategy_name_keyword}%")
+
+        if created_start:
+            query += " AND created_at >= ?"
+            params.append(created_start)
+
+        if created_end:
+            query += " AND created_at <= ?"
+            params.append(created_end)
+
+        query += " ORDER BY created_at DESC, id DESC LIMIT ?"
+        params.append(int(limit))
+
+        return self.execute_query(query, tuple(params))
+
+    def compare_backtest_results(self, result_id_a: int, result_id_b: int) -> Dict[str, Any]:
+        """比较两次实验结果，返回关键指标差异和差异来源说明。"""
+        rows = self.execute_query(
+            """
+            SELECT * FROM backtest_results
+            WHERE id IN (?, ?)
+            ORDER BY id ASC
+            """,
+            (result_id_a, result_id_b),
+        )
+
+        if len(rows) != 2:
+            raise ValueError("待比较实验不存在或数量不足")
+
+        row_a, row_b = rows[0], rows[1]
+
+        metric_keys = [
+            "final_value",
+            "total_return",
+            "annual_return",
+            "max_drawdown",
+            "sharpe_ratio",
+            "total_trades",
+            "win_rate",
+        ]
+
+        metric_diff: Dict[str, Dict[str, Any]] = {}
+        for key in metric_keys:
+            va = row_a.get(key)
+            vb = row_b.get(key)
+            if va is None or vb is None:
+                delta = None
+            else:
+                delta = vb - va
+            metric_diff[key] = {
+                "a": va,
+                "b": vb,
+                "delta_b_minus_a": delta,
+            }
+
+        config_a = self._safe_load_json(row_a.get("config_json"))
+        config_b = self._safe_load_json(row_b.get("config_json"))
+        source_diff = self._build_comparison_sources(row_a, row_b, config_a, config_b)
+
+        return {
+            "result_id_a": row_a["id"],
+            "result_id_b": row_b["id"],
+            "strategy_name_a": row_a["strategy_name"],
+            "strategy_name_b": row_b["strategy_name"],
+            "metric_diff": metric_diff,
+            "source_diff": source_diff,
+        }
+
+    @staticmethod
+    def _safe_load_json(payload: Any) -> Dict[str, Any]:
+        if not payload:
+            return {}
+        try:
+            if isinstance(payload, str):
+                return json.loads(payload)
+            if isinstance(payload, dict):
+                return payload
+        except Exception:
+            return {}
+        return {}
+
+    def _build_comparison_sources(
+        self,
+        row_a: Dict[str, Any],
+        row_b: Dict[str, Any],
+        config_a: Dict[str, Any],
+        config_b: Dict[str, Any],
+    ) -> List[str]:
+        source_diff: List[str] = []
+
+        if row_a.get("strategy_name") != row_b.get("strategy_name"):
+            source_diff.append("策略名称不同")
+
+        if row_a.get("symbol") != row_b.get("symbol"):
+            source_diff.append("标的不同")
+
+        period_a = (row_a.get("start_date"), row_a.get("end_date"))
+        period_b = (row_b.get("start_date"), row_b.get("end_date"))
+        if period_a != period_b:
+            source_diff.append("回测区间不同")
+
+        if config_a.get("commission_rate") != config_b.get("commission_rate"):
+            source_diff.append("手续费率不同")
+        if config_a.get("slippage_rate") != config_b.get("slippage_rate"):
+            source_diff.append("滑点率不同")
+
+        snapshot_a = config_a.get("experiment_snapshot", {})
+        snapshot_b = config_b.get("experiment_snapshot", {})
+
+        params_a = snapshot_a.get("strategy_snapshot", {}).get("strategy_params", {})
+        params_b = snapshot_b.get("strategy_snapshot", {}).get("strategy_params", {})
+        if params_a != params_b:
+            source_diff.append("策略参数不同")
+
+        pool_a = snapshot_a.get("ts_codes_snapshot", [])
+        pool_b = snapshot_b.get("ts_codes_snapshot", [])
+        if pool_a != pool_b:
+            source_diff.append("股票池快照不同")
+
+        data_scope_a = snapshot_a.get("data_scope", {})
+        data_scope_b = snapshot_b.get("data_scope", {})
+        if data_scope_a != data_scope_b:
+            source_diff.append("数据口径不同")
+
+        if not source_diff:
+            source_diff.append("未检测到显式配置差异，可能来自数据更新或随机性")
+
+        return source_diff

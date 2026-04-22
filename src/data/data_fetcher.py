@@ -46,7 +46,63 @@ class DataFetcher:
         self.meta_path = Path(self.config.get('market.meta_path', 'data/market_meta.json'))
         self._meta = self._load_meta()
 
+        # 质量评估配置
+        self.quality_report_dir = Path(self.config.get('quality.report_dir', 'data/quality_reports'))
+        self.quality_gate_warning_allow = bool(self.config.get('quality.gate_warning_allow', True))
+        self.quality_thresholds = self._load_quality_thresholds()
+
         logger.info("数据获取器初始化完成")
+
+    def _load_quality_thresholds(self) -> Dict[str, Any]:
+        defaults = dict(DataProcessor.DEFAULT_QUALITY_THRESHOLDS)
+        for k, v in defaults.items():
+            defaults[k] = self.config.get(f'quality.{k}', v)
+        return defaults
+
+    def _quality_report_path(self, symbol: str) -> Path:
+        self.quality_report_dir.mkdir(parents=True, exist_ok=True)
+        return self.quality_report_dir / f"{symbol}.json"
+
+    def load_quality_report(self, symbol: str) -> Optional[Dict[str, Any]]:
+        path = self._quality_report_path(symbol)
+        if not path.exists():
+            return None
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning(f'读取质量报告失败 {symbol}: {e}')
+            return None
+
+    def assess_stock_quality(self, symbol: str,
+                             start_date: Optional[str] = None,
+                             end_date: Optional[str] = None,
+                             force: bool = False) -> Dict[str, Any]:
+        """评估单只股票数据质量并落盘 JSON 报告。"""
+        if not force:
+            cached = self.load_quality_report(symbol)
+            if cached is not None:
+                return cached
+
+        df = self.get_stock_data(symbol, start_date, end_date)
+        if not df.empty:
+            eval_df = df.reset_index()
+            eval_df['trade_date'] = eval_df['trade_date'].dt.strftime('%Y%m%d')
+            eval_df['ts_code'] = symbol
+        else:
+            eval_df = pd.DataFrame(columns=['trade_date', 'open', 'high', 'low', 'close', 'volume', 'ts_code'])
+
+        report = DataProcessor.evaluate_quality(eval_df, thresholds=self.quality_thresholds, symbol=symbol)
+        report['generated_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        path = self._quality_report_path(symbol)
+        try:
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(report, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f'保存质量报告失败 {symbol}: {e}')
+
+        return report
 
     # ---------------- 基本全量接口（保持兼容） ----------------
     def fetch_and_store_data(self, symbol: str, days: int = 5 * 365) -> bool:

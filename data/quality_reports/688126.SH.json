@@ -1,0 +1,56 @@
+{
+  "symbol": "688126.SH",
+  "status": "warning",
+  "summary": "数据质量存在警告",
+  "stats": {
+    "total_rows": 714,
+    "unique_trade_dates": 714,
+    "expected_trade_dates": 782,
+    "missing_trade_dates": 68
+  },
+  "checks": {
+    "missing_ratio": {
+      "value": 0.086957,
+      "warning": 0.02,
+      "failed": 0.1
+    },
+    "duplicate_ratio": {
+      "value": 0.0,
+      "warning": 0.005,
+      "failed": 0.02
+    },
+    "date_disorder_ratio": {
+      "value": 0.0,
+      "warning": 0.005,
+      "failed": 0.02
+    },
+    "ohlc_anomaly_ratio": {
+      "value": 0.0,
+      "warning": 0.005,
+      "failed": 0.02
+    },
+    "non_positive_price_ratio": {
+      "value": 0.0,
+      "warning": 0.0,
+      "failed": 0.001
+    }
+  },
+  "warnings": [
+    "missing_ratio=0.086957 超过警告阈值 0.02"
+  ],
+  "blocking_reasons": [],
+  "thresholds": {
+    "missing_ratio_warning": 0.02,
+    "missing_ratio_failed": 0.1,
+    "duplicate_ratio_warning": 0.005,
+    "duplicate_ratio_failed": 0.02,
+    "date_disorder_ratio_warning": 0.005,
+    "date_disorder_ratio_failed": 0.02,
+    "ohlc_anomaly_ratio_warning": 0.005,
+    "ohlc_anomaly_ratio_failed": 0.02,
+    "non_positive_price_ratio_warning": 0.0,
+    "non_positive_price_ratio_failed": 0.001,
+    "min_rows_for_assessment": 2
+  },
+  "generated_at": "2026-04-21 13:52:37"
+}

@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 from typing import List, Optional
+from pathlib import Path
 
 import pandas as pd
 
@@ -24,6 +25,8 @@ from PyQt5.QtWidgets import (
 
 from ..backtesting.result import BacktestResult
 from ..analysis.aggregator import ResultAggregator
+from ..data.data_query import DataQuery
+from ..common.config import Config
 from .chart_widget import BacktestChartWidget
 
 # 显示列配置：(列头名称, DataFrame 列名, 是否为百分比列)
@@ -272,6 +275,7 @@ class _ChartDialog(QDialog):
 
     def __init__(self, result: BacktestResult, parent=None):
         super().__init__(parent)
+        self.setWindowFlags(self.windowFlags() | Qt.Window | Qt.WindowMinMaxButtonsHint)
         symbol = result.symbols[0] if result.symbols else "?"
         self.setWindowTitle(f"详细图表 — {symbol}")
         self.resize(1000, 650)
@@ -292,12 +296,41 @@ class _ChartDialog(QDialog):
         lbl.setStyleSheet("font-weight: bold; padding: 4px;")
         layout.addWidget(lbl)
 
+        # 从数据库获取 OHLC 数据
+        price_df = self._load_price_data(result, symbol)
+
         # 图表
         chart = BacktestChartWidget()
-        chart.update_charts(result, None)
+        chart.update_charts(result, price_df)
         layout.addWidget(chart)
 
         # 关闭按钮
         btn_box = QDialogButtonBox(QDialogButtonBox.Close)
         btn_box.rejected.connect(self.reject)
         layout.addWidget(btn_box)
+
+    def _load_price_data(self, result: BacktestResult, symbol: str) -> Optional[pd.DataFrame]:
+        """从数据库加载股票 OHLC 数据"""
+        try:
+            # 获取数据库路径
+            config = Config()
+            db_path = config.get("database.path", "data/stock_data.db")
+            
+            # 直接转换为绝对路径，相对于项目根目录
+            if not Path(db_path).is_absolute():
+                db_path = str(Path.cwd() / db_path)
+            
+            query = DataQuery(db_path)
+            
+            # 获取回测期间的数据
+            price_df = query.get_stock_daily(
+                symbol,
+                start_date=result.start_date,
+                end_date=result.end_date
+            )
+            
+            return price_df if not price_df.empty else None
+        except Exception as e:
+            from loguru import logger
+            logger.warning(f"加载 OHLC 数据失败 ({symbol}): {str(e)}")
+            return None

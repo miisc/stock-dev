@@ -39,3 +39,40 @@ api:
 risk:
   max_drawdown: 0.15  # 最大回撤限制
   position_limit: 0.8  # 总仓位上限
+
+# 数据质量门禁配置
+quality:
+  report_dir: "data/quality_reports"
+  gate_warning_allow: true
+  missing_ratio_warning: 0.02
+  missing_ratio_failed: 0.10
+  duplicate_ratio_warning: 0.005
+  duplicate_ratio_failed: 0.02
+  date_disorder_ratio_warning: 0.005
+  date_disorder_ratio_failed: 0.02
+  ohlc_anomaly_ratio_warning: 0.005
+  ohlc_anomaly_ratio_failed: 0.02
+  non_positive_price_ratio_warning: 0.0
+  non_positive_price_ratio_failed: 0.001
+  min_rows_for_assessment: 2
+
+# 一致性与性能验收配置
+repeatability:
+  warning:
+    total_return: 0.2
+    annual_return: 0.2
+    max_drawdown: 0.2
+    sharpe_ratio: 0.1
+    win_rate: 1.0
+  failed:
+    total_return: 0.5
+    annual_return: 0.5
+    max_drawdown: 0.5
+    sharpe_ratio: 0.2
+    win_rate: 2.0
+
+performance:
+  download_p95_seconds: 30
+  batch_download_p95_minutes: 30
+  single_backtest_p95_seconds: 5
+  batch_backtest_p95_minutes: 30

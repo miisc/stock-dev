@@ -73,4 +73,3 @@ Thumbs.db
 # Project specific
 data/stock_data.db
 test_stock_data.db
-stock-env/

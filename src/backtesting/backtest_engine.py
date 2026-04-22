@@ -11,6 +11,7 @@ import pandas as pd
 from loguru import logger
 
 from ..data.data_query import DataQuery
+from ..data.data_fetcher import DataFetcher
 from ..trading.strategy import Strategy
 from ..trading.bar_data import BarData
 from ..trading.signal import Signal, Direction
@@ -18,6 +19,7 @@ from .executor import ExecutionExecutor
 from .position_manager import PositionManager
 from .cost_model import CostModel
 from .result import BacktestResult
+from ..common.config import Config
 
 
 @dataclass
@@ -40,7 +42,7 @@ class BacktestConfig:
 class BacktestEngine:
     """回测引擎"""
     
-    def __init__(self, config: BacktestConfig):
+    def __init__(self, config: BacktestConfig, app_config: Optional[Config] = None):
         """
         初始化回测引擎
         
@@ -48,9 +50,12 @@ class BacktestEngine:
             config: 回测配置
         """
         self.config = config
+        self.app_config = app_config or Config()
+        self.db_path = self.app_config.get('database.path', 'data/stock_data.db')
         
         # 初始化组件
-        self.data_query = DataQuery(db_path="data/stock_data.db")
+        self.data_query = DataQuery(db_path=self.db_path)
+        self.data_fetcher = DataFetcher(self.app_config)
         self.executor = ExecutionExecutor(
             commission_rate=config.commission_rate,
             slippage_rate=config.slippage_rate
@@ -73,6 +78,7 @@ class BacktestEngine:
         self.daily_portfolio: List[Dict[str, Any]] = []
         # 待执行订单（当日生成信号，次日开盘执行，避免前视偏差）
         self.pending_orders: List[Signal] = []
+        self.quality_hints: List[str] = []
         
         logger.info(f"回测引擎初始化完成，时间范围: {config.start_date} 到 {config.end_date}")
     
@@ -131,6 +137,9 @@ class BacktestEngine:
         
         # 重置状态
         self._reset_state()
+
+        # 回测前质量门禁：自动补评估旧数据并按状态放行
+        self._apply_quality_gate(symbols)
         
         # 加载数据
         data_dict = self.load_data(symbols)
@@ -198,6 +207,7 @@ class BacktestEngine:
         
         # 生成回测结果
         result = self._generate_result(strategy, symbols)
+        result.quality_hints = list(self.quality_hints)
         
         logger.info(f"回测完成，总收益率: {result.total_return:.2f}%")
         
@@ -213,6 +223,7 @@ class BacktestEngine:
         self.trades = []
         self.daily_portfolio = []
         self.pending_orders = []
+        self.quality_hints = []
         
         # 重置组件状态
         self.executor.reset()
@@ -276,3 +287,30 @@ class BacktestEngine:
             daily_portfolio=self.daily_portfolio,
             benchmark=self.config.benchmark
         )
+
+    def _apply_quality_gate(self, symbols: List[str]) -> None:
+        """按质量状态进行回测放行。warning 默认放行并记录提示。"""
+        start_str = self.config.start_date.strftime('%Y-%m-%d') if self.config.start_date else None
+        end_str = self.config.end_date.strftime('%Y-%m-%d') if self.config.end_date else None
+        warning_allow = bool(self.app_config.get('quality.gate_warning_allow', True))
+
+        for symbol in symbols:
+            report = self.data_fetcher.assess_stock_quality(symbol, start_date=start_str, end_date=end_str, force=False)
+            status = str(report.get('status', 'failed')).lower()
+
+            if status == 'failed':
+                reasons = report.get('blocking_reasons', [])
+                reason_msg = '; '.join(reasons) if reasons else '数据质量不通过'
+                logger.error(f"质量门禁拦截 {symbol}: {reason_msg}")
+                raise ValueError(f"{symbol} 数据质量不通过: {reason_msg}")
+
+            if status == 'warning':
+                warnings = report.get('warnings', [])
+                warn_msg = '; '.join(warnings) if warnings else '数据质量存在警告'
+                if warning_allow:
+                    hint = f"{symbol}: {warn_msg}"
+                    self.quality_hints.append(hint)
+                    logger.warning(f"质量门禁警告放行 {hint}")
+                else:
+                    logger.error(f"质量门禁拦截 {symbol}: warning 不允许放行")
+                    raise ValueError(f"{symbol} 数据质量警告且当前策略不允许放行")

@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """
 PyQt界面启动脚本
 """

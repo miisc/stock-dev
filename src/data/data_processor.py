@@ -1,6 +1,6 @@
 """
 数据处理器
-负责数据清洗、前复权计算和异常值处理
+负责数据清洗、前复权计算、异常值处理与数据质量评估
 """
 
 import pandas as pd
@@ -11,6 +11,20 @@ from loguru import logger
 
 class DataProcessor:
     """数据处理器类"""
+
+    DEFAULT_QUALITY_THRESHOLDS = {
+        "missing_ratio_warning": 0.02,
+        "missing_ratio_failed": 0.10,
+        "duplicate_ratio_warning": 0.005,
+        "duplicate_ratio_failed": 0.02,
+        "date_disorder_ratio_warning": 0.005,
+        "date_disorder_ratio_failed": 0.02,
+        "ohlc_anomaly_ratio_warning": 0.005,
+        "ohlc_anomaly_ratio_failed": 0.02,
+        "non_positive_price_ratio_warning": 0.0,
+        "non_positive_price_ratio_failed": 0.001,
+        "min_rows_for_assessment": 2,
+    }
     
     @staticmethod
     def clean_data(df: pd.DataFrame) -> pd.DataFrame:
@@ -194,3 +208,121 @@ class DataProcessor:
         logger.info(f"数据处理完成，最终得到 {len(processed_df)} 条有效记录")
         
         return processed_df
+
+    @staticmethod
+    def evaluate_quality(df: pd.DataFrame,
+                         thresholds: Optional[dict] = None,
+                         symbol: Optional[str] = None) -> dict:
+        """评估数据质量并返回结构化报告。"""
+        cfg = dict(DataProcessor.DEFAULT_QUALITY_THRESHOLDS)
+        if thresholds:
+            cfg.update(thresholds)
+
+        report = {
+            "symbol": symbol or (str(df["ts_code"].iloc[0]) if not df.empty and "ts_code" in df.columns else ""),
+            "status": "failed",
+            "summary": "",
+            "stats": {
+                "total_rows": int(len(df)),
+                "unique_trade_dates": 0,
+            },
+            "checks": {},
+            "warnings": [],
+            "blocking_reasons": [],
+            "thresholds": cfg,
+        }
+
+        if df.empty:
+            report["blocking_reasons"].append("数据为空")
+            report["summary"] = "数据为空，质量评估失败"
+            return report
+
+        required_cols = ["trade_date", "open", "high", "low", "close", "volume"]
+        missing_cols = [c for c in required_cols if c not in df.columns]
+        if missing_cols:
+            report["blocking_reasons"].append(f"缺少必要列: {missing_cols}")
+            report["summary"] = "必要列缺失，质量评估失败"
+            return report
+
+        if len(df) < int(cfg.get("min_rows_for_assessment", 2)):
+            report["blocking_reasons"].append("样本行数不足")
+            report["summary"] = "样本行数不足，质量评估失败"
+            return report
+
+        local_df = df.copy()
+        trade_dates = pd.to_datetime(local_df["trade_date"].astype(str), format="%Y%m%d", errors="coerce")
+        valid_date_mask = trade_dates.notna()
+        total_rows = len(local_df)
+
+        # 缺失交易日比例：按工作日近似统计
+        date_min = trade_dates[valid_date_mask].min()
+        date_max = trade_dates[valid_date_mask].max()
+        if pd.isna(date_min) or pd.isna(date_max):
+            expected_days = 0
+        else:
+            expected_days = len(pd.bdate_range(date_min, date_max))
+        unique_days = int(trade_dates[valid_date_mask].nunique())
+        missing_days = max(expected_days - unique_days, 0)
+        missing_ratio = (missing_days / expected_days) if expected_days > 0 else 0.0
+
+        # 重复比例
+        duplicate_rows = int(local_df.duplicated(subset=["trade_date"]).sum())
+        duplicate_ratio = duplicate_rows / total_rows if total_rows > 0 else 0.0
+
+        # 日期乱序比例（按原顺序）
+        disorder_rows = 0
+        prev = None
+        for d in trade_dates:
+            if pd.isna(d):
+                continue
+            if prev is not None and d < prev:
+                disorder_rows += 1
+            prev = d
+        date_disorder_ratio = disorder_rows / total_rows if total_rows > 0 else 0.0
+
+        # OHLC 异常比例
+        invalid_hl = (local_df["high"] < local_df["low"]).sum()
+        invalid_hc = (local_df["high"] < local_df[["open", "close"]].max(axis=1)).sum()
+        invalid_lc = (local_df["low"] > local_df[["open", "close"]].min(axis=1)).sum()
+        ohlc_anomaly_rows = int(invalid_hl + invalid_hc + invalid_lc)
+        ohlc_anomaly_ratio = ohlc_anomaly_rows / total_rows if total_rows > 0 else 0.0
+
+        # 非正价格比例
+        non_positive_rows = int((local_df[["open", "high", "low", "close"]] <= 0).any(axis=1).sum())
+        non_positive_price_ratio = non_positive_rows / total_rows if total_rows > 0 else 0.0
+
+        checks = {
+            "missing_ratio": {"value": round(missing_ratio, 6), "warning": cfg["missing_ratio_warning"], "failed": cfg["missing_ratio_failed"]},
+            "duplicate_ratio": {"value": round(duplicate_ratio, 6), "warning": cfg["duplicate_ratio_warning"], "failed": cfg["duplicate_ratio_failed"]},
+            "date_disorder_ratio": {"value": round(date_disorder_ratio, 6), "warning": cfg["date_disorder_ratio_warning"], "failed": cfg["date_disorder_ratio_failed"]},
+            "ohlc_anomaly_ratio": {"value": round(ohlc_anomaly_ratio, 6), "warning": cfg["ohlc_anomaly_ratio_warning"], "failed": cfg["ohlc_anomaly_ratio_failed"]},
+            "non_positive_price_ratio": {"value": round(non_positive_price_ratio, 6), "warning": cfg["non_positive_price_ratio_warning"], "failed": cfg["non_positive_price_ratio_failed"]},
+        }
+
+        report["checks"] = checks
+        report["stats"]["unique_trade_dates"] = unique_days
+        report["stats"]["expected_trade_dates"] = expected_days
+        report["stats"]["missing_trade_dates"] = missing_days
+
+        has_failed = False
+        has_warning = False
+        for name, item in checks.items():
+            value = item["value"]
+            if value > item["failed"]:
+                has_failed = True
+                report["blocking_reasons"].append(f"{name}={value} 超过失败阈值 {item['failed']}")
+            elif value > item["warning"]:
+                has_warning = True
+                report["warnings"].append(f"{name}={value} 超过警告阈值 {item['warning']}")
+
+        if has_failed:
+            report["status"] = "failed"
+            report["summary"] = "数据质量不通过"
+        elif has_warning:
+            report["status"] = "warning"
+            report["summary"] = "数据质量存在警告"
+        else:
+            report["status"] = "pass"
+            report["summary"] = "数据质量通过"
+
+        return report
