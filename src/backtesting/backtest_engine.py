@@ -264,13 +264,31 @@ class BacktestEngine:
         # 计算组合价值
         portfolio_value = self.position_manager.calculate_portfolio_value(prices)
         
+        # 构建持仓快照，含每笔浮盈浮亏
+        positions_snapshot = []
+        total_unrealized_pnl = 0.0
+        for pos in self.position_manager.get_positions_snapshot():
+            symbol = pos.get('symbol', '')
+            volume = pos.get('volume', 0)
+            avg_price = pos.get('avg_price', 0.0)
+            close_price = prices.get(symbol, avg_price)
+            market_value = close_price * volume
+            unrealized_pnl = (close_price - avg_price) * volume
+            total_unrealized_pnl += unrealized_pnl
+            positions_snapshot.append({
+                **pos,
+                'market_value': market_value,
+                'unrealized_pnl': unrealized_pnl,
+            })
+        
         # 保存每日组合状态
         self.daily_portfolio.append({
             'date': date,
             'total_value': portfolio_value,
             'cash': self.position_manager.cash,
             'position_value': portfolio_value - self.position_manager.cash,
-            'positions': self.position_manager.get_positions_snapshot()
+            'unrealized_pnl': total_unrealized_pnl,
+            'positions': positions_snapshot,
         })
     
     def _generate_result(self, strategy: Strategy, symbols: List[str]) -> BacktestResult:

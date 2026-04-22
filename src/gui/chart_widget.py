@@ -499,7 +499,14 @@ class TradeDetailWidget(QWidget):
         self._update_summary(rows)
 
     def _populate_table(self, rows):
-        self.table.setRowCount(len(rows))
+        # 计算已实现盈亏汇总（仅卖出笔）
+        sell_rows = [r for r in rows if r["direction"] == "S"]
+        total_realized_pnl = sum(r["pnl"] for r in sell_rows)
+        win_count = sum(1 for r in sell_rows if r["pnl"] > 0)
+        loss_count = sum(1 for r in sell_rows if r["pnl"] < 0)
+
+        # 交易行 + 1行汇总
+        self.table.setRowCount(len(rows) + 1)
         for row_idx, row in enumerate(rows):
             item_date = QTableWidgetItem(row["date"])
             item_date.setTextAlignment(Qt.AlignCenter)
@@ -518,21 +525,56 @@ class TradeDetailWidget(QWidget):
             item_price.setTextAlignment(Qt.AlignCenter)
             self.table.setItem(row_idx, 3, item_price)
 
-            item_pnl = QTableWidgetItem(f"{row['pnl']:.2f}")
-            item_pnl.setTextAlignment(Qt.AlignCenter)
-            if row["pnl"] > 0:
-                item_pnl.setForeground(QColor("#66bb6a"))
-            elif row["pnl"] < 0:
-                item_pnl.setForeground(QColor("#ef5350"))
-            self.table.setItem(row_idx, 4, item_pnl)
+            # 已实现盈亏和收益率仅在卖出笔显示，买入笔显示“-”
+            if row["direction"] == "S":
+                item_pnl = QTableWidgetItem(f"{row['pnl']:.2f}")
+                item_pnl.setTextAlignment(Qt.AlignCenter)
+                if row["pnl"] > 0:
+                    item_pnl.setForeground(QColor("#66bb6a"))
+                elif row["pnl"] < 0:
+                    item_pnl.setForeground(QColor("#ef5350"))
+                self.table.setItem(row_idx, 4, item_pnl)
 
-            item_ret = QTableWidgetItem(f"{row['ret']:.2f}")
-            item_ret.setTextAlignment(Qt.AlignCenter)
-            if row["ret"] > 0:
-                item_ret.setForeground(QColor("#66bb6a"))
-            elif row["ret"] < 0:
-                item_ret.setForeground(QColor("#ef5350"))
-            self.table.setItem(row_idx, 5, item_ret)
+                item_ret = QTableWidgetItem(f"{row['ret']:.2f}")
+                item_ret.setTextAlignment(Qt.AlignCenter)
+                if row["ret"] > 0:
+                    item_ret.setForeground(QColor("#66bb6a"))
+                elif row["ret"] < 0:
+                    item_ret.setForeground(QColor("#ef5350"))
+                self.table.setItem(row_idx, 5, item_ret)
+            else:
+                for col in (4, 5):
+                    item_dash = QTableWidgetItem("-")
+                    item_dash.setTextAlignment(Qt.AlignCenter)
+                    item_dash.setForeground(QColor("#9aa3b2"))
+                    self.table.setItem(row_idx, col, item_dash)
+
+        # 汇总行
+        summary_row = len(rows)
+        pnl_color = "#66bb6a" if total_realized_pnl >= 0 else "#ef5350"
+        summary_labels = [
+            ("合计", 0),
+            (f"卖出 {len(sell_rows)} 笔", 1),
+            (f"盈 {win_count} / 亏 {loss_count}", 2),
+            ("已实现盈亏", 3),
+            (f"{total_realized_pnl:.2f}", 4),
+            ("", 5),
+        ]
+        for text, col in summary_labels:
+            item = QTableWidgetItem(text)
+            item.setTextAlignment(Qt.AlignCenter)
+            item.setFlags(Qt.ItemIsEnabled)  # 不可选中
+            if col == 4:
+                item.setForeground(QColor(pnl_color))
+                font = item.font()
+                font.setBold(True)
+                item.setFont(font)
+            else:
+                item.setForeground(QColor("#9aa3b2"))
+                font = item.font()
+                font.setBold(True)
+                item.setFont(font)
+            self.table.setItem(summary_row, col, item)
 
     def _render_pnl_chart(self, rows, selected_idx=None):
         self.figure.clear()

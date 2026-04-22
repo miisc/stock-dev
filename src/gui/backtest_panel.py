@@ -244,6 +244,14 @@ class BacktestPanel(QWidget):
         self.slippage_spin.setSingleStep(0.0001)
         cost_form.addRow("滑点率:", self.slippage_spin)
 
+        self.trade_amount_spin = QDoubleSpinBox()
+        self.trade_amount_spin.setRange(1000, 1_000_000)
+        self.trade_amount_spin.setValue(10_000)
+        self.trade_amount_spin.setSuffix(" 元")
+        self.trade_amount_spin.setSingleStep(1000)
+        self.trade_amount_spin.setDecimals(0)
+        cost_form.addRow("每笔金额:", self.trade_amount_spin)
+
         stamp_label = QLabel("印花税: 0.1% 卖出时固定")
         stamp_label.setStyleSheet("color: gray; font-size: 11px;")
         cost_form.addRow("", stamp_label)
@@ -354,8 +362,11 @@ class BacktestPanel(QWidget):
 
         def factory():
             instance = strategy_config_manager.create_strategy(sid)
-            if params and hasattr(instance, "set_parameters"):
-                instance.set_parameters(params)
+            merged_params = dict(params)
+            merged_params["sizing_mode"] = "fixed_amount"
+            merged_params["trade_amount"] = self.trade_amount_spin.value()
+            if merged_params and hasattr(instance, "set_parameters"):
+                instance.set_parameters(merged_params)
             return instance
 
         return factory

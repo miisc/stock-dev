@@ -46,11 +46,13 @@ class RSIStrategy(Strategy):
             "rsi_period": 14,          # RSI 计算周期
             "oversold": 30,            # 超卖阈值，RSI 低于此值视为超卖
             "overbought": 70,          # 超买阈值，RSI 高于此值视为超买
-            "position_size": 100,      # 每次交易数量（股）
+            "position_size": 100,      # 每次交易数量（fixed_shares模式）
             "min_hold_bars": 3,        # 最少持仓 K 线数，避免频繁交易
             "stop_loss_pct": 0.05,     # 止损百分比
             "take_profit_pct": 0.15,   # 止盈百分比
             "rsi_smooth": True,        # 是否使用 Wilder 平滑法（否则用简单均值）
+            "sizing_mode": "fixed_shares",  # 仓位模式: fixed_shares | fixed_amount
+            "trade_amount": 10000,     # 固定金额模式下每笔买入金额（元）
         }
 
         if params:
@@ -257,7 +259,17 @@ class RSIStrategy(Strategy):
         if self.position_open_bars > 0 and self.position_open_bars < self.get_parameter("min_hold_bars"):
             return
 
-        volume = self.get_parameter("position_size")
+        sizing_mode = self.get_parameter("sizing_mode") or "fixed_shares"
+        if sizing_mode == "fixed_amount":
+            trade_amount = float(self.get_parameter("trade_amount") or 10000)
+            volume = int(trade_amount // bar.close) if bar.close > 0 else 0
+            if volume <= 0:
+                self.logger.warning(
+                    f"fixed_amount模式: 单价 {bar.close:.2f} 超过每笔金额 {trade_amount:.0f}，跳过买入信号"
+                )
+                return
+        else:
+            volume = self.get_parameter("position_size")
         confidence = self._calculate_signal_confidence(Direction.BUY)
 
         signal = self.buy(

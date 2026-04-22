@@ -245,6 +245,10 @@ class BacktestResult:
         # 计算累计收益率
         df['cumulative_return'] = (df['total_value'] / self.initial_cash - 1) * 100
         
+        # 确保 unrealized_pnl 列存在（兼容旧数据）
+        if 'unrealized_pnl' not in df.columns:
+            df['unrealized_pnl'] = 0.0
+        
         return df
     
     def to_dict(self) -> Dict[str, Any]:

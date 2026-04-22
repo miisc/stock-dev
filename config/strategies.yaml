@@ -9,11 +9,13 @@ strategies:
     parameters:
       short_window: 5          # 短期均线窗口
       long_window: 20          # 长期均线窗口
-      position_size: 100        # 每次交易数量
+      position_size: 100        # 每次交易数量（fixed_shares模式）
       min_hold_bars: 3         # 最少持仓K线数
       signal_threshold: 0.01    # 信号确认阈值
       stop_loss_pct: 0.05      # 止损百分比
       take_profit_pct: 0.10    # 止盈百分比
+      sizing_mode: fixed_amount  # 仓位模式: fixed_shares | fixed_amount
+      trade_amount: 10000       # 固定金额模式每笔买入金额（元）
   
   # 保守型双均线策略配置
   dual_ma_conservative:

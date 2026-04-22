@@ -42,11 +42,13 @@ class DualMovingAverageStrategy(Strategy):
         default_params = {
             "short_window": 5,      # 短期均线窗口
             "long_window": 20,      # 长期均线窗口
-            "position_size": 100,   # 每次交易数量
+            "position_size": 100,   # 每次交易数量（fixed_shares模式）
             "min_hold_bars": 3,     # 最少持仓K线数
             "signal_threshold": 0.01,  # 信号确认阈值
             "stop_loss_pct": 0.05,  # 止损百分比
             "take_profit_pct": 0.10, # 止盈百分比
+            "sizing_mode": "fixed_shares",  # 仓位模式: fixed_shares | fixed_amount
+            "trade_amount": 10000,  # 固定金额模式下每笔买入金额（元）
         }
         
         if params:
@@ -166,8 +168,18 @@ class DualMovingAverageStrategy(Strategy):
         if self.position_open_bars < self.get_parameter("min_hold_bars"):
             return
         
-        # 生成买入信号
-        volume = self.get_parameter("position_size")
+        # 计算买入数量
+        sizing_mode = self.get_parameter("sizing_mode") or "fixed_shares"
+        if sizing_mode == "fixed_amount":
+            trade_amount = float(self.get_parameter("trade_amount") or 10000)
+            volume = int(trade_amount // bar.close) if bar.close > 0 else 0
+            if volume <= 0:
+                self.logger.warning(
+                    f"fixed_amount模式: 单价 {bar.close:.2f} 超过每笔金额 {trade_amount:.0f}，跳过买入信号"
+                )
+                return
+        else:
+            volume = self.get_parameter("position_size")
         confidence = self._calculate_signal_confidence(bar, Direction.BUY)
         
         signal = self.buy(
